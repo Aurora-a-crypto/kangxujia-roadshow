@@ -1,0 +1,593 @@
+{
+  "patients": [
+    {
+      "id": "P001",
+      "alias": "患者A",
+      "name": "张大爷",
+      "gender": "男",
+      "age": 68,
+      "diagnosis": "脑梗死",
+      "discharge": "2026-04-03",
+      "stage": "出院后第4周",
+      "rehabStage": "强化恢复期",
+      "fallRisk": "高",
+      "familySupport": "高协同",
+      "risk": "高风险",
+      "status": "预警待处理",
+      "disease": "右侧偏瘫，平衡差，步态不稳，训练中曾出现头晕。",
+      "adl": 62,
+      "score": 58,
+      "compliance": 66,
+      "assessment": {
+        "upperLimb": 54,
+        "lowerLimb": 48,
+        "gait": 42,
+        "fatigue": 5,
+        "fallRisk": "高",
+        "swallowing": "正常",
+        "speech": "轻度构音不清",
+        "cognition": "基本正常",
+        "rehabStage": "强化恢复期",
+        "balance": 45,
+        "adl": 62,
+        "pain": 4,
+        "comment": "高跌倒风险，建议强化坐位平衡、重心转移与家属保护。"
+      },
+      "recommendation": {
+        "direction": "平衡控制、下肢负重与安全转移训练",
+        "frequency": "每日1次，每周5天",
+        "duration": "20分钟",
+        "familyAssist": "需要家属全程保护"
+      },
+      "plans": [
+        {
+          "id": "TP001",
+          "name": "平衡与步态稳定计划",
+          "target": "提升核心稳定，减少代偿动作",
+          "active": true,
+          "createdAt": "2026-04-20",
+          "actions": [
+            {
+              "id": "AC001",
+              "name": "床旁坐位平衡训练",
+              "category": "平衡",
+              "description": "坐于床旁，保持躯干直立，左右轻微重心转移。",
+              "reps": "10次",
+              "sets": 3,
+              "duration": "10分钟",
+              "difficulty": "中",
+              "assist": true,
+              "safety": "家属站在患侧保护，避免突然站立。"
+            },
+            {
+              "id": "AC002",
+              "name": "扶持站立转换",
+              "category": "下肢",
+              "description": "从坐位过渡到站立，治疗师远程指导动作节奏。",
+              "reps": "6次",
+              "sets": 2,
+              "duration": "8分钟",
+              "difficulty": "高",
+              "assist": true,
+              "safety": "头晕或心慌时立即停止。"
+            },
+            {
+              "id": "AC003",
+              "name": "左右重心转移",
+              "category": "步态",
+              "description": "扶稳定支撑物，左右转移重心，训练患侧承重。",
+              "reps": "8次",
+              "sets": 3,
+              "duration": "8分钟",
+              "difficulty": "中",
+              "assist": true,
+              "safety": "避免膝关节内扣，保持支撑物稳定。"
+            }
+          ]
+        }
+      ],
+      "logs": [
+        {
+          "date": "2026-04-26",
+          "done": true,
+          "pain": 3,
+          "fatigue": 4,
+          "dizzy": false,
+          "note": "完成较好"
+        },
+        {
+          "date": "2026-04-27",
+          "done": true,
+          "pain": 4,
+          "fatigue": 5,
+          "dizzy": false,
+          "note": "站立不稳"
+        },
+        {
+          "date": "2026-04-28",
+          "done": false,
+          "pain": 5,
+          "fatigue": 6,
+          "dizzy": true,
+          "note": "训练中断，出现头晕"
+        },
+        {
+          "date": "2026-04-29",
+          "done": true,
+          "pain": 4,
+          "fatigue": 5,
+          "dizzy": false,
+          "note": "家属协助"
+        },
+        {
+          "date": "2026-04-30",
+          "done": true,
+          "pain": 3,
+          "fatigue": 4,
+          "dizzy": false,
+          "note": "完成训练"
+        },
+        {
+          "date": "2026-05-01",
+          "done": false,
+          "pain": 6,
+          "fatigue": 7,
+          "dizzy": true,
+          "note": "头晕，未完成"
+        },
+        {
+          "date": "2026-05-02",
+          "done": true,
+          "pain": 4,
+          "fatigue": 5,
+          "dizzy": false,
+          "note": "完成一半"
+        }
+      ],
+      "followups": [
+        {
+          "date": "2026-05-01",
+          "method": "线上",
+          "adherence": "近一周依从性波动，存在训练中断。",
+          "functionChange": "坐位稳定略有改善，站立仍不稳。",
+          "problem": "训练时头晕和疲劳偏高。",
+          "suggestion": "训练前测量血压，站立转换需家属在右侧保护。",
+          "revisit": true,
+          "revisitReason": "持续头晕需排查血压和用药影响。",
+          "nextDate": "2026-05-08",
+          "author": "李康复师"
+        }
+      ],
+      "alerts": [
+        {
+          "handler": "",
+          "handledAt": "",
+          "id": "A001",
+          "patientId": "P001",
+          "type": "头晕/跌倒风险预警",
+          "level": "高风险",
+          "reason": "打卡记录出现头晕，且患者基础跌倒风险高。",
+          "suggestion": "治疗师优先随访，暂停高强度站立训练，强化家属保护。",
+          "status": "pending",
+          "createdAt": "2026-05-01 18:12:00"
+        },
+        {
+          "id": "VIS-P001",
+          "patientId": "P001",
+          "type": "视觉识别置信度预警",
+          "level": "高风险",
+          "reason": "AI视觉记录显示动作平滑度48分，Jerk峰值4.6，2.5D补偿置信度66%。",
+          "suggestion": "请家属调整摄像头位置，完成标准姿势校准后再训练。",
+          "status": "pending",
+          "createdAt": "2026-05-02 19:10:00",
+          "handler": "",
+          "handledAt": ""
+        }
+      ],
+      "vision": {
+        "calibration": {
+          "upperArmBaseline": 132,
+          "forearmBaseline": 118,
+          "cameraPosition": "正前方或斜前方，接近肩部高度"
+        },
+        "summary": "普通摄像头采集后，先进行骨长校准和2.5D补偿，再计算手腕轨迹Jerk，并按训练处方剪枝关键点。",
+        "sessions": [
+          {
+            "date": "2026-05-02",
+            "action": "床旁坐位平衡训练",
+            "smoothnessScore": 48,
+            "jerkPeak": 4.6,
+            "jerkVariance": 1.32,
+            "riskLevel": "高风险",
+            "estimatedReachAngle": 18,
+            "projectionShortening": 12,
+            "compensatedAmplitude": 41,
+            "compensationConfidence": 66,
+            "recognitionMode": "平衡模式",
+            "trackedPoints": [
+              "双肩",
+              "双髋",
+              "躯干中线",
+              "膝部参考点"
+            ],
+            "retainedKeypoints": 12,
+            "pruningRatio": 64,
+            "avgFps": 23,
+            "latency": 180,
+            "deviceLoad": "中负载",
+            "suggestion": "动作卡顿和抖动较明显，建议放慢速度并由治疗师复核训练强度。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "P002",
+      "alias": "患者B",
+      "name": "李阿姨",
+      "gender": "女",
+      "age": 62,
+      "diagnosis": "脑出血",
+      "discharge": "2026-04-11",
+      "stage": "出院后第3周",
+      "rehabStage": "基础恢复期",
+      "fallRisk": "中",
+      "familySupport": "高协同",
+      "risk": "中风险",
+      "status": "待随访",
+      "disease": "左上肢功能障碍，床椅转移能力差，家属协助较多。",
+      "adl": 70,
+      "score": 66,
+      "compliance": 78,
+      "assessment": {
+        "upperLimb": 46,
+        "lowerLimb": 62,
+        "gait": 58,
+        "fatigue": 4,
+        "fallRisk": "中",
+        "swallowing": "正常",
+        "speech": "正常",
+        "cognition": "基本正常",
+        "rehabStage": "基础恢复期",
+        "balance": 60,
+        "adl": 70,
+        "pain": 3,
+        "comment": "转移能力不足，需强化上肢主动参与和家属协同。"
+      },
+      "recommendation": {
+        "direction": "上肢功能、床椅转移与ADL训练",
+        "frequency": "每日1次，每周5天",
+        "duration": "25分钟",
+        "familyAssist": "建议家属在转移训练时协助"
+      },
+      "plans": [
+        {
+          "id": "TP002",
+          "name": "上肢功能与转移能力计划",
+          "target": "改善左上肢主动参与和床椅转移",
+          "active": true,
+          "createdAt": "2026-04-22",
+          "actions": [
+            {
+              "id": "AC004",
+              "name": "肩肘主动辅助训练",
+              "category": "上肢",
+              "description": "健侧带动患侧完成肩屈曲和肘伸展。",
+              "reps": "12次",
+              "sets": 4,
+              "duration": "10分钟",
+              "difficulty": "中",
+              "assist": true,
+              "safety": "避免牵拉患侧肩关节。"
+            },
+            {
+              "id": "AC005",
+              "name": "床椅转移训练",
+              "category": "ADL",
+              "description": "从床边转移到椅子，练习重心前移和手扶支撑。",
+              "reps": "5次",
+              "sets": 3,
+              "duration": "12分钟",
+              "difficulty": "中",
+              "assist": true,
+              "safety": "轮椅刹车锁定后再训练。"
+            }
+          ]
+        }
+      ],
+      "logs": [
+        {
+          "date": "2026-04-26",
+          "done": true,
+          "pain": 2,
+          "fatigue": 3,
+          "dizzy": false,
+          "note": "家属辅助完成"
+        },
+        {
+          "date": "2026-04-27",
+          "done": true,
+          "pain": 3,
+          "fatigue": 4,
+          "dizzy": false,
+          "note": "完成"
+        },
+        {
+          "date": "2026-04-28",
+          "done": true,
+          "pain": 3,
+          "fatigue": 4,
+          "dizzy": false,
+          "note": "完成"
+        },
+        {
+          "date": "2026-04-29",
+          "done": false,
+          "pain": 4,
+          "fatigue": 5,
+          "dizzy": false,
+          "note": "家中有事"
+        },
+        {
+          "date": "2026-04-30",
+          "done": true,
+          "pain": 3,
+          "fatigue": 4,
+          "dizzy": false,
+          "note": "完成"
+        },
+        {
+          "date": "2026-05-01",
+          "done": true,
+          "pain": 3,
+          "fatigue": 3,
+          "dizzy": false,
+          "note": "完成"
+        },
+        {
+          "date": "2026-05-02",
+          "done": true,
+          "pain": 2,
+          "fatigue": 3,
+          "dizzy": false,
+          "note": "状态稳定"
+        }
+      ],
+      "followups": [
+        {
+          "date": "2026-04-30",
+          "method": "电话",
+          "adherence": "整体依从性较好。",
+          "functionChange": "转移速度提升。",
+          "problem": "左肩保护意识不足。",
+          "suggestion": "继续家属协助转移训练，注意左肩保护。",
+          "revisit": false,
+          "revisitReason": "",
+          "nextDate": "2026-05-07",
+          "author": "李康复师"
+        }
+      ],
+      "alerts": [],
+      "vision": {
+        "calibration": {
+          "upperArmBaseline": 132,
+          "forearmBaseline": 118,
+          "cameraPosition": "正前方或斜前方，接近肩部高度"
+        },
+        "summary": "普通摄像头采集后，先进行骨长校准和2.5D补偿，再计算手腕轨迹Jerk，并按训练处方剪枝关键点。",
+        "sessions": [
+          {
+            "date": "2026-05-02",
+            "action": "肩肘主动辅助训练",
+            "smoothnessScore": 73,
+            "jerkPeak": 2.4,
+            "jerkVariance": 0.62,
+            "riskLevel": "轻度不稳定",
+            "estimatedReachAngle": 31,
+            "projectionShortening": 24,
+            "compensatedAmplitude": 64,
+            "compensationConfidence": 78,
+            "recognitionMode": "上肢模式",
+            "trackedPoints": [
+              "患侧肩",
+              "患侧肘",
+              "患侧腕",
+              "健侧肩",
+              "髋部参考点"
+            ],
+            "retainedKeypoints": 10,
+            "pruningRatio": 70,
+            "avgFps": 28,
+            "latency": 132,
+            "deviceLoad": "低-中负载",
+            "suggestion": "动作存在轻度波动，建议维持当前训练并关注摄像头角度。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "P003",
+      "alias": "患者C",
+      "name": "王叔叔",
+      "gender": "男",
+      "age": 55,
+      "diagnosis": "脑梗死",
+      "discharge": "2026-03-28",
+      "stage": "出院后第5周",
+      "rehabStage": "巩固提升期",
+      "fallRisk": "低",
+      "familySupport": "中协同",
+      "risk": "低风险",
+      "status": "训练中",
+      "disease": "恢复较好，步行耐力待提升。",
+      "adl": 84,
+      "score": 82,
+      "compliance": 91,
+      "assessment": {
+        "upperLimb": 80,
+        "lowerLimb": 82,
+        "gait": 84,
+        "fatigue": 3,
+        "fallRisk": "低",
+        "swallowing": "正常",
+        "speech": "正常",
+        "cognition": "正常",
+        "rehabStage": "巩固提升期",
+        "balance": 78,
+        "adl": 84,
+        "pain": 1,
+        "comment": "恢复趋势良好，可逐步增加耐力训练。"
+      },
+      "recommendation": {
+        "direction": "步行耐力、下肢力量与社区活动能力",
+        "frequency": "每日1次，每周5-6天",
+        "duration": "30分钟",
+        "familyAssist": "一般不需要，仅外出训练时陪同"
+      },
+      "plans": [
+        {
+          "id": "TP003",
+          "name": "步行耐力提升计划",
+          "target": "提升步行稳定性和生活自理能力",
+          "active": true,
+          "createdAt": "2026-04-18",
+          "actions": [
+            {
+              "id": "AC006",
+              "name": "室内步行训练",
+              "category": "步态",
+              "description": "室内平地连续步行，保持步幅均匀。",
+              "reps": "1次",
+              "sets": 1,
+              "duration": "12分钟",
+              "difficulty": "低",
+              "assist": false,
+              "safety": "保持环境无障碍物。"
+            },
+            {
+              "id": "AC007",
+              "name": "坐站转换训练",
+              "category": "下肢",
+              "description": "从坐位起立再缓慢坐下，控制膝关节方向。",
+              "reps": "10次",
+              "sets": 4,
+              "duration": "10分钟",
+              "difficulty": "中",
+              "assist": false,
+              "safety": "疲劳评分超过5时减少组数。"
+            }
+          ]
+        }
+      ],
+      "logs": [
+        {
+          "date": "2026-04-26",
+          "done": true,
+          "pain": 1,
+          "fatigue": 3,
+          "dizzy": false,
+          "note": "完成"
+        },
+        {
+          "date": "2026-04-27",
+          "done": true,
+          "pain": 1,
+          "fatigue": 3,
+          "dizzy": false,
+          "note": "完成"
+        },
+        {
+          "date": "2026-04-28",
+          "done": true,
+          "pain": 2,
+          "fatigue": 4,
+          "dizzy": false,
+          "note": "完成"
+        },
+        {
+          "date": "2026-04-29",
+          "done": true,
+          "pain": 1,
+          "fatigue": 3,
+          "dizzy": false,
+          "note": "完成"
+        },
+        {
+          "date": "2026-04-30",
+          "done": true,
+          "pain": 1,
+          "fatigue": 2,
+          "dizzy": false,
+          "note": "完成"
+        },
+        {
+          "date": "2026-05-01",
+          "done": true,
+          "pain": 1,
+          "fatigue": 3,
+          "dizzy": false,
+          "note": "完成"
+        },
+        {
+          "date": "2026-05-02",
+          "done": true,
+          "pain": 1,
+          "fatigue": 2,
+          "dizzy": false,
+          "note": "完成"
+        }
+      ],
+      "followups": [
+        {
+          "date": "2026-04-29",
+          "method": "线上",
+          "adherence": "依从性高。",
+          "functionChange": "步行耐力提升。",
+          "problem": "户外训练经验不足。",
+          "suggestion": "可增加户外平地步行，保持疲劳评分低于5。",
+          "revisit": false,
+          "revisitReason": "",
+          "nextDate": "2026-05-09",
+          "author": "李康复师"
+        }
+      ],
+      "alerts": [],
+      "vision": {
+        "calibration": {
+          "upperArmBaseline": 132,
+          "forearmBaseline": 118,
+          "cameraPosition": "正前方或斜前方，接近肩部高度"
+        },
+        "summary": "普通摄像头采集后，先进行骨长校准和2.5D补偿，再计算手腕轨迹Jerk，并按训练处方剪枝关键点。",
+        "sessions": [
+          {
+            "date": "2026-05-02",
+            "action": "室内步行训练",
+            "smoothnessScore": 88,
+            "jerkPeak": 1.1,
+            "jerkVariance": 0.22,
+            "riskLevel": "低风险",
+            "estimatedReachAngle": 43,
+            "projectionShortening": 32,
+            "compensatedAmplitude": 82,
+            "compensationConfidence": 91,
+            "recognitionMode": "步态模式",
+            "trackedPoints": [
+              "双髋",
+              "双膝",
+              "双踝",
+              "足跟/足尖",
+              "躯干"
+            ],
+            "retainedKeypoints": 15,
+            "pruningRatio": 55,
+            "avgFps": 32,
+            "latency": 96,
+            "deviceLoad": "低负载",
+            "suggestion": "动作连续性较好，可继续当前训练处方。"
+          }
+        ]
+      }
+    }
+  ],
+  "updatedAt": "2026-05-06T11:03:07.853Z"
+}

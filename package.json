@@ -1,0 +1,14 @@
+{
+  "name": "kangxujia-roadshow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "康续家脑卒中居家康复连续干预云平台路演服务",
+  "main": "roadshow-server.cjs",
+  "scripts": {
+    "start": "node roadshow-server.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}
