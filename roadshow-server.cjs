@@ -3,18 +3,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { URL } = require('node:url');
-const {
-  authenticate,
-  getDatabaseSummary,
-  getPatients,
-  getVisualActions,
-  resetDatabase,
-  savePatients
-} = require('./database.cjs');
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 8766);
 const HOST = process.env.HOST || '0.0.0.0';
+const DATA_FILE = path.join(ROOT, 'shared-patients.json');
 
 function localIPv4() {
   const nets = os.networkInterfaces();
@@ -34,7 +27,10 @@ const mime = {
   '.png':'image/png',
   '.jpg':'image/jpeg',
   '.jpeg':'image/jpeg',
-  '.svg':'image/svg+xml'
+  '.svg':'image/svg+xml',
+  '.wasm':'application/wasm',
+  '.data':'application/octet-stream',
+  '.binarypb':'application/octet-stream'
 };
 
 function send(res, status, body, headers = {}) {
@@ -262,54 +258,20 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname === '/api/patients') {
     if (req.method === 'GET') {
-      try {
-        return send(res, 200, JSON.stringify({
-          patients:getPatients(),
-          visualActions:getVisualActions(),
-          updatedAt:new Date().toISOString(),
-          source:'sqlite'
-        }), { 'Content-Type':mime['.json'] });
-      } catch (error) {
-        return send(res, 500, JSON.stringify({ error:error.message }), { 'Content-Type':mime['.json'] });
-      }
+      if (!fs.existsSync(DATA_FILE)) return send(res, 200, JSON.stringify({ patients:null, updatedAt:null }), { 'Content-Type':mime['.json'] });
+      return send(res, 200, fs.readFileSync(DATA_FILE), { 'Content-Type':mime['.json'] });
     }
     if (req.method === 'POST') {
       try {
         const payload = await readJson(req);
         if (!Array.isArray(payload.patients)) return send(res, 400, JSON.stringify({ error:'patients must be an array' }), { 'Content-Type':mime['.json'] });
-        savePatients(payload.patients, payload.updatedAt || new Date().toISOString());
-        return send(res, 200, JSON.stringify({ ok:true, source:'sqlite' }), { 'Content-Type':mime['.json'] });
+        fs.writeFileSync(DATA_FILE, JSON.stringify({ patients:payload.patients, updatedAt:payload.updatedAt || new Date().toISOString() }, null, 2));
+        return send(res, 200, JSON.stringify({ ok:true }), { 'Content-Type':mime['.json'] });
       } catch (error) {
         return send(res, 400, JSON.stringify({ error:error.message }), { 'Content-Type':mime['.json'] });
       }
     }
     return send(res, 405, 'Method Not Allowed');
-  }
-
-  if (url.pathname === '/api/auth/login' && req.method === 'POST') {
-    try {
-      const payload = await readJson(req);
-      const user = authenticate(payload.username, payload.password);
-      if (!user) {
-        return send(res, 401, JSON.stringify({ error:'账号或密码错误' }), { 'Content-Type':mime['.json'] });
-      }
-      return send(res, 200, JSON.stringify({ user }), { 'Content-Type':mime['.json'] });
-    } catch (error) {
-      return send(res, 400, JSON.stringify({ error:error.message }), { 'Content-Type':mime['.json'] });
-    }
-  }
-
-  if (url.pathname === '/api/database/summary' && req.method === 'GET') {
-    return send(res, 200, JSON.stringify(getDatabaseSummary()), { 'Content-Type':mime['.json'] });
-  }
-
-  if (url.pathname === '/api/database/reset' && req.method === 'POST') {
-    try {
-      resetDatabase();
-      return send(res, 200, JSON.stringify({ ok:true }), { 'Content-Type':mime['.json'] });
-    } catch (error) {
-      return send(res, 500, JSON.stringify({ error:error.message }), { 'Content-Type':mime['.json'] });
-    }
   }
 
   if (url.pathname === '/qr.svg') {
@@ -333,9 +295,14 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, body, { 'Content-Type':mime['.js'] });
   }
 
-  const safePath = decodeURIComponent(url.pathname === '/' || url.pathname === '/s' ? '/site.html' : url.pathname);
-  const filePath = path.normalize(path.join(ROOT, safePath));
-  if (!filePath.startsWith(ROOT)) return send(res, 403, 'Forbidden');
+  const posePrefix = '/vendor/mediapipe/pose/';
+  const isPoseAsset = url.pathname.startsWith(posePrefix);
+  const staticRoot = isPoseAsset ? path.join(ROOT, 'node_modules', '@mediapipe', 'pose') : ROOT;
+  const requestedPath = isPoseAsset
+    ? url.pathname.slice(posePrefix.length)
+    : (url.pathname === '/' || url.pathname === '/s' ? 'site.html' : url.pathname.replace(/^\/+/, ''));
+  const filePath = path.normalize(path.join(staticRoot, decodeURIComponent(requestedPath)));
+  if (!filePath.startsWith(staticRoot)) return send(res, 403, 'Forbidden');
   fs.readFile(filePath, (error, data) => {
     if (error) return send(res, 404, 'Not Found');
     send(res, 200, data, { 'Content-Type':mime[path.extname(filePath).toLowerCase()] || 'application/octet-stream' });

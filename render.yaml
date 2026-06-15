@@ -6,12 +6,6 @@ services:
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /s
-    disk:
-      name: kangxujia-database
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: HOST
         value: 0.0.0.0
-      - key: DATABASE_PATH
-        value: /var/data/kangxujia.db

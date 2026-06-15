@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>康续家 - 脑卒中患者居家康复连续干预云平台</title>
-  <link rel="icon" href="data:,">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
     * { box-sizing: border-box; }
+    html, body { margin:0; width:100%; max-width:100%; }
     body { font-family: 'Noto Sans SC', sans-serif; background:#f4f7fb; color:#0f172a; overflow:hidden; }
     .hidden-view { display:none !important; }
     .nav-active { background:#1e40af; color:#fff !important; box-shadow:0 12px 28px rgba(30,64,175,.22); }
@@ -29,13 +29,12 @@
     .vision-meter { height:8px; border-radius:999px; background:#e2e8f0; overflow:hidden; }
     .vision-meter > span { display:block; height:100%; width:0%; background:linear-gradient(90deg,#0f766e,#1e40af); transition:width .18s ease; }
     .vision-stage { position:relative; border:3px solid transparent; }
+    #vision-video { z-index:1; }
+    #vision-canvas { z-index:2; }
     .vision-stage.alarm { border-color:#dc2626; animation: alarmPulse .75s ease-in-out infinite; }
     .vision-alert-overlay { position:absolute; inset:0; display:none; align-items:flex-start; justify-content:center; padding:18px; background:rgba(220,38,38,.20); color:#fff; text-align:center; z-index:5; pointer-events:none; }
     .vision-stage.alarm .vision-alert-overlay { display:flex; }
     .vision-alert-box { max-width:560px; border:3px solid rgba(255,255,255,.92); background:rgba(127,29,29,.88); border-radius:20px; padding:14px 18px; box-shadow:0 20px 50px rgba(127,29,29,.35); }
-    .vision-training-layout { display:grid; grid-template-columns:minmax(0,1fr); gap:16px 24px; align-items:start; }
-    .vision-side-panel { align-self:start; }
-    #vision-coach-card { display:none; }
     .fallback-shell { min-height:100vh; }
     @keyframes alarmPulse { 0%,100% { box-shadow:0 0 0 0 rgba(220,38,38,.50); } 50% { box-shadow:0 0 0 10px rgba(220,38,38,.10); } }
     /* CDN 失败时的本地兜底样式：保证手机路演不出现裸 HTML。 */
@@ -63,12 +62,6 @@
     @media (min-width:1024px){.lg\:grid-cols-\[1\.1fr_\.9fr\]{grid-template-columns:1.1fr .9fr}}
     @media (min-width:1280px){.xl\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.xl\:grid-cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}.xl\:grid-cols-6{grid-template-columns:repeat(6,minmax(0,1fr))}.xl\:grid-cols-8{grid-template-columns:repeat(8,minmax(0,1fr))}.xl\:grid-cols-\[\.95fr_1\.05fr\]{grid-template-columns:.95fr 1.05fr}.xl\:grid-cols-\[1fr_1\.2fr\]{grid-template-columns:1fr 1.2fr}.xl\:grid-cols-\[1\.1fr_\.9fr\]{grid-template-columns:1.1fr .9fr}.xl\:grid-cols-\[1\.15fr_\.85fr\]{grid-template-columns:1.15fr .85fr}.xl\:flex-row{flex-direction:row}.xl\:items-center{align-items:center}.xl\:items-start{align-items:flex-start}.xl\:justify-between{justify-content:space-between}}
     @media (min-width:1536px){.\32xl\:grid-cols-\[1fr_1\.25fr\]{grid-template-columns:1fr 1.25fr}}
-    @media (min-width:1280px){
-      .vision-training-layout { grid-template-columns:minmax(0,1.18fr) minmax(340px,.82fr); }
-      #vision-mobile-coach { display:none; }
-      .vision-side-panel { position:sticky; top:16px; }
-      #vision-coach-card { display:block; }
-    }
     @media (max-width: 900px), ((max-height: 560px) and (orientation: landscape)) {
       body { overflow:auto; }
       #app-shell { flex-direction:column; height:auto !important; min-height:100vh; }
@@ -185,24 +178,108 @@
 
   <script src="/roadshow-config.js"></script>
   <script>
-    // ================== 数据库认证与数据持久化 ==================
+    // ================== 基础账号与数据持久化 ==================
     const STORAGE_KEY = 'kangxujia-platform-v3';
     const ROADSHOW_CONFIG = window.KANGXUJIA_ROADSHOW || {};
     const ROADSHOW_HOST = ROADSHOW_CONFIG.host || location.hostname || '127.0.0.1';
     const ROADSHOW_PORT = ROADSHOW_CONFIG.port || location.port || '8766';
     const ROADSHOW_PUBLIC_URL = ROADSHOW_CONFIG.publicUrl || '';
     const SYNC_ENDPOINT = `${location.origin}/api/patients`;
-    const AUTH_ENDPOINT = `${location.origin}/api/auth/login`;
-    const state = { currentUser:null, selectedPatientId:'P001', selectedVisionActionId:'VA001', charts:[], patients:[], visualActions:[], currentViewId:'', syncTimer:null, lastSyncAt:'-' };
-    const visionRuntime = {
-      camera:null, stream:null, pose:null, hands:null, running:false, training:false,
-      lastResults:null, lastHandResults:null, lastFrameTime:0, metrics:null, raf:null,
-      audio:null, alarmActive:false, alarmFrames:0, lastAlarmAt:0, lastSpeechAt:0, lastSpeechText:'',
-      poseBase:'https://cdn.jsdelivr.net/npm/@mediapipe/pose', poseFrames:0, poseBusy:false,
-      handsBase:'https://cdn.jsdelivr.net/npm/@mediapipe/hands', handsBusy:false,
-      missedFrames:0, warningFrames:0, lastPoseSentAt:0, lastHandsSentAt:0
+    const accounts = {
+      admin001: { password:'123456', role:'admin', name:'王主任', label:'管理员' },
+      therapist001: { password:'123456', role:'therapist', name:'李康复师', label:'治疗师' },
+      caregiver001: { password:'123456', role:'caregiver', name:'张阿姨', label:'家属', boundPatientId:'P001' },
+      patient001: { password:'123456', role:'patient', name:'张大爷', label:'患者', boundPatientId:'P001' },
+      judge001: { password:'123456', role:'judge', name:'评委老师', label:'评委查看', boundPatientId:'P001' }
     };
 
+    const initialPatients = [
+      {
+        id:'P001', alias:'患者A', name:'张大爷', gender:'男', age:68, diagnosis:'脑梗死', discharge:'2026-04-03', stage:'出院后第4周',
+        rehabStage:'强化恢复期', fallRisk:'高', familySupport:'高协同', risk:'高风险', status:'预警待处理', disease:'右侧偏瘫，平衡差，步态不稳，训练中曾出现头晕。',
+        adl:62, score:58, compliance:66,
+        assessment:{ upperLimb:54, lowerLimb:48, balance:45, gait:42, adl:62, pain:4, fatigue:5, fallRisk:'高', swallowing:'正常', speech:'轻度构音不清', cognition:'基本正常', rehabStage:'强化恢复期', comment:'高跌倒风险，建议强化坐位平衡、重心转移与家属保护。' },
+        recommendation:{ direction:'平衡控制、下肢负重与安全转移训练', frequency:'每日1次，每周5天', duration:'20分钟', familyAssist:'需要家属全程保护' },
+        plans:[{ id:'TP001', name:'平衡与步态稳定计划', target:'提升核心稳定，减少代偿动作', active:true, createdAt:'2026-04-20', actions:[
+          { id:'AC001', name:'床旁坐位平衡训练', category:'平衡', description:'坐于床旁，保持躯干直立，左右轻微重心转移。', reps:'10次', sets:3, duration:'10分钟', difficulty:'中', assist:true, safety:'家属站在患侧保护，避免突然站立。' },
+          { id:'AC002', name:'扶持站立转换', category:'下肢', description:'从坐位过渡到站立，治疗师远程指导动作节奏。', reps:'6次', sets:2, duration:'8分钟', difficulty:'高', assist:true, safety:'头晕或心慌时立即停止。' },
+          { id:'AC003', name:'左右重心转移', category:'步态', description:'扶稳定支撑物，左右转移重心，训练患侧承重。', reps:'8次', sets:3, duration:'8分钟', difficulty:'中', assist:true, safety:'避免膝关节内扣，保持支撑物稳定。' }
+        ]}],
+        logs:[
+          { date:'2026-04-26', done:true, pain:3, fatigue:4, dizzy:false, note:'完成较好' },
+          { date:'2026-04-27', done:true, pain:4, fatigue:5, dizzy:false, note:'站立不稳' },
+          { date:'2026-04-28', done:false, pain:5, fatigue:6, dizzy:true, note:'训练中断，出现头晕' },
+          { date:'2026-04-29', done:true, pain:4, fatigue:5, dizzy:false, note:'家属协助' },
+          { date:'2026-04-30', done:true, pain:3, fatigue:4, dizzy:false, note:'完成训练' },
+          { date:'2026-05-01', done:false, pain:6, fatigue:7, dizzy:true, note:'头晕，未完成' },
+          { date:'2026-05-02', done:true, pain:4, fatigue:5, dizzy:false, note:'完成一半' }
+        ],
+        followups:[{ date:'2026-05-01', method:'线上', adherence:'近一周依从性波动，存在训练中断。', functionChange:'坐位稳定略有改善，站立仍不稳。', problem:'训练时头晕和疲劳偏高。', suggestion:'训练前测量血压，站立转换需家属在右侧保护。', revisit:true, revisitReason:'持续头晕需排查血压和用药影响。', nextDate:'2026-05-08', author:'李康复师' }],
+        alerts:[{ id:'A001', patientId:'P001', type:'头晕/跌倒风险预警', level:'高风险', reason:'打卡记录出现头晕，且患者基础跌倒风险高。', suggestion:'治疗师优先随访，暂停高强度站立训练，强化家属保护。', status:'pending', createdAt:'2026-05-01 18:12:00', handler:'', handledAt:'' }]
+      },
+      {
+        id:'P002', alias:'患者B', name:'李阿姨', gender:'女', age:62, diagnosis:'脑出血', discharge:'2026-04-11', stage:'出院后第3周',
+        rehabStage:'基础恢复期', fallRisk:'中', familySupport:'高协同', risk:'中风险', status:'待随访', disease:'左上肢功能障碍，床椅转移能力差，家属协助较多。',
+        adl:70, score:66, compliance:78,
+        assessment:{ upperLimb:46, lowerLimb:62, balance:60, gait:58, adl:70, pain:3, fatigue:4, fallRisk:'中', swallowing:'正常', speech:'正常', cognition:'基本正常', rehabStage:'基础恢复期', comment:'转移能力不足，需强化上肢主动参与和家属协同。' },
+        recommendation:{ direction:'上肢功能、床椅转移与ADL训练', frequency:'每日1次，每周5天', duration:'25分钟', familyAssist:'建议家属在转移训练时协助' },
+        plans:[{ id:'TP002', name:'上肢功能与转移能力计划', target:'改善左上肢主动参与和床椅转移', active:true, createdAt:'2026-04-22', actions:[
+          { id:'AC004', name:'肩肘主动辅助训练', category:'上肢', description:'健侧带动患侧完成肩屈曲和肘伸展。', reps:'12次', sets:4, duration:'10分钟', difficulty:'中', assist:true, safety:'避免牵拉患侧肩关节。' },
+          { id:'AC005', name:'床椅转移训练', category:'ADL', description:'从床边转移到椅子，练习重心前移和手扶支撑。', reps:'5次', sets:3, duration:'12分钟', difficulty:'中', assist:true, safety:'轮椅刹车锁定后再训练。' }
+        ]}],
+        logs:[
+          { date:'2026-04-26', done:true, pain:2, fatigue:3, dizzy:false, note:'家属辅助完成' },
+          { date:'2026-04-27', done:true, pain:3, fatigue:4, dizzy:false, note:'完成' },
+          { date:'2026-04-28', done:true, pain:3, fatigue:4, dizzy:false, note:'完成' },
+          { date:'2026-04-29', done:false, pain:4, fatigue:5, dizzy:false, note:'家中有事' },
+          { date:'2026-04-30', done:true, pain:3, fatigue:4, dizzy:false, note:'完成' },
+          { date:'2026-05-01', done:true, pain:3, fatigue:3, dizzy:false, note:'完成' },
+          { date:'2026-05-02', done:true, pain:2, fatigue:3, dizzy:false, note:'状态稳定' }
+        ],
+        followups:[{ date:'2026-04-30', method:'电话', adherence:'整体依从性较好。', functionChange:'转移速度提升。', problem:'左肩保护意识不足。', suggestion:'继续家属协助转移训练，注意左肩保护。', revisit:false, revisitReason:'', nextDate:'2026-05-07', author:'李康复师' }],
+        alerts:[]
+      },
+      {
+        id:'P003', alias:'患者C', name:'王叔叔', gender:'男', age:55, diagnosis:'脑梗死', discharge:'2026-03-28', stage:'出院后第5周',
+        rehabStage:'巩固提升期', fallRisk:'低', familySupport:'中协同', risk:'低风险', status:'训练中', disease:'恢复较好，步行耐力待提升。',
+        adl:84, score:82, compliance:91,
+        assessment:{ upperLimb:80, lowerLimb:82, balance:78, gait:84, adl:84, pain:1, fatigue:3, fallRisk:'低', swallowing:'正常', speech:'正常', cognition:'正常', rehabStage:'巩固提升期', comment:'恢复趋势良好，可逐步增加耐力训练。' },
+        recommendation:{ direction:'步行耐力、下肢力量与社区活动能力', frequency:'每日1次，每周5-6天', duration:'30分钟', familyAssist:'一般不需要，仅外出训练时陪同' },
+        plans:[{ id:'TP003', name:'步行耐力提升计划', target:'提升步行稳定性和生活自理能力', active:true, createdAt:'2026-04-18', actions:[
+          { id:'AC006', name:'室内步行训练', category:'步态', description:'室内平地连续步行，保持步幅均匀。', reps:'1次', sets:1, duration:'12分钟', difficulty:'低', assist:false, safety:'保持环境无障碍物。' },
+          { id:'AC007', name:'坐站转换训练', category:'下肢', description:'从坐位起立再缓慢坐下，控制膝关节方向。', reps:'10次', sets:4, duration:'10分钟', difficulty:'中', assist:false, safety:'疲劳评分超过5时减少组数。' }
+        ]}],
+        logs:[
+          { date:'2026-04-26', done:true, pain:1, fatigue:3, dizzy:false, note:'完成' },
+          { date:'2026-04-27', done:true, pain:1, fatigue:3, dizzy:false, note:'完成' },
+          { date:'2026-04-28', done:true, pain:2, fatigue:4, dizzy:false, note:'完成' },
+          { date:'2026-04-29', done:true, pain:1, fatigue:3, dizzy:false, note:'完成' },
+          { date:'2026-04-30', done:true, pain:1, fatigue:2, dizzy:false, note:'完成' },
+          { date:'2026-05-01', done:true, pain:1, fatigue:3, dizzy:false, note:'完成' },
+          { date:'2026-05-02', done:true, pain:1, fatigue:2, dizzy:false, note:'完成' }
+        ],
+        followups:[{ date:'2026-04-29', method:'线上', adherence:'依从性高。', functionChange:'步行耐力提升。', problem:'户外训练经验不足。', suggestion:'可增加户外平地步行，保持疲劳评分低于5。', revisit:false, revisitReason:'', nextDate:'2026-05-09', author:'李康复师' }],
+        alerts:[]
+      }
+    ];
+
+    const state = { currentUser:null, selectedPatientId:'P001', charts:[], patients:loadPatients(), currentViewId:'', syncTimer:null, lastSyncAt:'-' };
+    const visionRuntime = {
+      camera:null, stream:null, pose:null, running:false, training:false,
+      lastResults:null, lastFrameTime:0, metrics:null, raf:null,
+      audio:null, alarmActive:false, alarmFrames:0, alarmSafeFrames:0, lastAlarmAt:0,
+      poseBase:'https://cdn.jsdelivr.net/npm/@mediapipe/pose', poseFrames:0, poseBusy:false,
+      missedFrames:0, warningFrames:0, lastPoseSentAt:0, poseResultAt:0, poseErrors:0
+    };
+
+    function loadPatients() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        return saved ? normalizePatients(JSON.parse(saved)) : normalizePatients(structuredClone(initialPatients));
+      } catch (error) {
+        return normalizePatients(structuredClone(initialPatients));
+      }
+    }
     function canUseSyncApi() { return /^https?:$/.test(location.protocol) && !location.protocol.startsWith('file'); }
     async function pullSharedData(render = false) {
       if (!canUseSyncApi()) return false;
@@ -212,10 +289,9 @@
         const payload = await res.json();
         if (Array.isArray(payload.patients)) {
           state.patients = normalizePatients(payload.patients);
-          state.visualActions = Array.isArray(payload.visualActions) ? payload.visualActions : [];
           localStorage.setItem(STORAGE_KEY, JSON.stringify(state.patients));
           state.lastSyncAt = new Date().toLocaleTimeString('zh-CN', { hour12:false });
-          updateSyncBadge('数据库已同步 ' + state.lastSyncAt, 'text-success');
+          updateSyncBadge('已同步 ' + state.lastSyncAt, 'text-success');
           if (render && state.currentUser && state.currentViewId && !visionRuntime.training && document.getElementById('modal').classList.contains('hidden-view')) {
             switchView(state.currentViewId, true);
           }
@@ -255,24 +331,18 @@
         el.textContent = text;
       }
     }
-    async function resetSystemData() {
+    function resetSystemData() {
       if (!canResetData()) {
         openToast('当前账号不能重置系统数据。');
         return;
       }
-      if (!confirm('确认从 Excel 数据包重新初始化数据库？当前新增记录会被清空。')) return;
-      try {
-        const response = await fetch(`${location.origin}/api/database/reset`, { method:'POST' });
-        if (!response.ok) throw new Error('数据库重置失败');
-        await pullSharedData(false);
-        state.selectedPatientId = 'P001';
-        localStorage.removeItem('kangxujia-judge-daily-used');
-        closeModal();
-        renderMenu();
-        openToast('数据库已恢复为 Excel 数据包的初始记录。');
-      } catch (error) {
-        openToast(error.message || '数据库重置失败。');
-      }
+      if (!confirm('确认恢复初始测试数据？当前新增记录会被清空。')) return;
+      state.patients = normalizePatients(structuredClone(initialPatients));
+      state.selectedPatientId = 'P001';
+      localStorage.removeItem('kangxujia-judge-daily-used');
+      saveData();
+      closeModal();
+      renderMenu();
     }
     function normalizePatients(patients) {
       return patients.map(p => {
@@ -353,32 +423,17 @@
     async function loginByPassword() {
       const account = document.getElementById('login-account').value.trim();
       const password = document.getElementById('login-password').value.trim();
+      const user = accounts[account];
       const err = document.getElementById('login-error');
-      err.classList.add('hidden-view');
-      let user = null;
-      try {
-        const response = await fetch(AUTH_ENDPOINT, {
-          method:'POST',
-          headers:{ 'Content-Type':'application/json' },
-          body:JSON.stringify({ username:account, password })
-        });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || '登录失败');
-        user = payload.user;
-      } catch (error) {
-        err.textContent = error.message || '无法连接数据库登录服务。';
+      if (!user || user.password !== password) {
+        err.textContent = '账号或密码错误，请使用系统测试账号登录。';
         err.classList.remove('hidden-view');
         return;
       }
       state.currentUser = user;
       state.selectedPatientId = user.boundPatientId || state.selectedPatientId;
       const pulled = await pullSharedData(false);
-      if (!pulled || !state.patients.length) {
-        state.currentUser = null;
-        err.textContent = '登录成功，但数据库数据读取失败，请稍后重试。';
-        err.classList.remove('hidden-view');
-        return;
-      }
+      if (!pulled) pushSharedData();
       document.getElementById('login-page').classList.add('hidden-view');
       document.getElementById('app-shell').classList.remove('hidden-view');
       document.getElementById('user-name').textContent = user.name;
@@ -472,7 +527,11 @@
     }
     async function ensurePoseLibrariesRobust() {
       if (typeof Pose !== 'undefined') return true;
-      const bases = ['https://cdn.jsdelivr.net/npm/@mediapipe/pose', 'https://unpkg.com/@mediapipe/pose'];
+      const bases = [
+        '/vendor/mediapipe/pose',
+        'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404',
+        'https://unpkg.com/@mediapipe/pose@0.5.1675469404'
+      ];
       for (let i = 0; i < bases.length; i++) {
         const src = `${bases[i]}/pose.js`;
         try {
@@ -481,24 +540,6 @@
           await loadScriptOnce(src, 'Pose');
           if (typeof Pose !== 'undefined') {
             visionRuntime.poseBase = bases[i];
-            return true;
-          }
-        } catch (error) {
-          document.querySelectorAll(`script[data-src="${src}"]`).forEach(el => el.remove());
-        }
-      }
-      return false;
-    }
-    async function ensureHandLibrariesRobust() {
-      if (typeof Hands !== 'undefined') return true;
-      const bases = ['https://cdn.jsdelivr.net/npm/@mediapipe/hands', 'https://unpkg.com/@mediapipe/hands'];
-      for (let i = 0; i < bases.length; i++) {
-        const src = `${bases[i]}/hands.js`;
-        try {
-          setVisionPhase(`加载手部精细识别模块 ${i + 1}/${bases.length}`, 30 + i * 6);
-          await loadScriptOnce(src, 'Hands');
-          if (typeof Hands !== 'undefined') {
-            visionRuntime.handsBase = bases[i];
             return true;
           }
         } catch (error) {
@@ -528,11 +569,12 @@
     function setVisionAlarm(active, message = '') {
       const stage = document.getElementById('vision-stage');
       const text = document.getElementById('vision-alert-text');
+      const wasActive = visionRuntime.alarmActive;
       if (active) {
         stage?.classList.add('alarm');
         if (text) text.textContent = message || '检测到异常姿态，请立即停止训练。';
         const now = Date.now();
-        if (now - visionRuntime.lastAlarmAt > 1800) {
+        if (!wasActive && now - visionRuntime.lastAlarmAt > 1200) {
           playVisionAlarm();
           visionRuntime.lastAlarmAt = now;
         }
@@ -540,266 +582,6 @@
         stage?.classList.remove('alarm');
       }
       visionRuntime.alarmActive = active;
-    }
-    function speakVisionFeedback(text, options = {}) {
-      if (!text || !('speechSynthesis' in window)) return;
-      const now = Date.now();
-      const minGap = options.minGap ?? 6500;
-      if (!options.force && now - visionRuntime.lastSpeechAt < minGap) return;
-      if (!options.force && visionRuntime.lastSpeechText === text && now - visionRuntime.lastSpeechAt < 12000) return;
-      if (options.interrupt) window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'zh-CN';
-      utterance.rate = .86;
-      utterance.pitch = 1.02;
-      utterance.volume = .9;
-      window.speechSynthesis.speak(utterance);
-      visionRuntime.lastSpeechAt = now;
-      visionRuntime.lastSpeechText = text;
-    }
-    function guidedCoachForAction(action) {
-      if (action.actionCode === 'touch_opposite_shoulder') return [
-        { title:'坐稳放松', message:'先坐稳，双脚放好，肩膀轻轻放松。我们不着急。' },
-        { title:'慢慢抬手', message:'很好，现在把患侧手慢慢抬起来，手肘轻轻靠近身体。' },
-        { title:'轻触肩膀', message:'继续保持身体坐正，慢慢去触碰对侧肩膀。' },
-        { title:'缓慢返回', message:'做得很好，慢慢把手放回原位，休息一下。' }
-      ];
-      if (action.actionCode === 'forearm_pronation_supination') return [
-        { title:'摆好姿势', message:'先坐稳，把患侧前臂轻轻放在桌面上，肩膀放松。' },
-        { title:'手掌向上', message:'很好，前臂尽量不动，慢慢把手掌翻向上方。' },
-        { title:'手掌向下', message:'保持手腕稳定，再慢慢把手掌翻向下方。' },
-        { title:'平稳重复', message:'做得不错，按照刚才的节奏，缓慢重复这个动作。' }
-      ];
-      if (action.actionCode === 'hand_grip_release') return [
-        { title:'手掌放平', message:'先坐稳，把患侧手轻轻放平，肩膀和手腕都放松。' },
-        { title:'慢慢握拳', message:'很好，现在慢慢握紧拳头，做到自己的舒适范围就可以。' },
-        { title:'慢慢张开', message:'接下来慢慢张开手指，尽量让每根手指都舒展开。' },
-        { title:'轻松重复', message:'做得很好，保持呼吸，按照这个节奏继续握紧再张开。' }
-      ];
-      return [
-        { title:'准备姿势', message:'先调整到舒适、安全的姿势，我们慢慢开始。' },
-        { title:'开始动作', message:'很好，请按照训练要求缓慢完成动作。' },
-        { title:'保持稳定', message:'保持呼吸，动作慢一点、稳一点。' },
-        { title:'完成休息', message:'做得很好，慢慢回到起始位置并休息。' }
-      ];
-    }
-    function renderCoachProgress(metrics, currentStep = 0) {
-      const action = metrics?.action || currentVisionAction(patient(accessiblePatientId()));
-      const steps = guidedCoachForAction(action);
-      const progress = document.getElementById('vision-coach-progress');
-      if (!progress) return;
-      progress.innerHTML = steps.map((step,index) => `
-        <div class="rounded-xl px-2 py-2 text-center text-[11px] font-black border ${index < currentStep ? 'bg-green-50 border-green-100 text-success' : index === currentStep ? 'bg-white border-teal-300 text-accent' : 'bg-slate-50 border-slate-100 text-slate-400'}">
-          ${index < currentStep ? '<i class="fa-solid fa-check mr-1"></i>' : `${index + 1}.`} ${step.title}
-        </div>`).join('');
-    }
-    function setCoachStep(metrics, stepIndex, speak = true) {
-      const steps = guidedCoachForAction(metrics.action);
-      const next = Math.max(0, Math.min(steps.length - 1, stepIndex));
-      if (metrics.coachStarted && next < metrics.coachStep) return;
-      if (metrics.coachStarted && next > metrics.coachStep && Date.now() - (metrics.coachChangedAt || 0) < 4000) return;
-      if (metrics.coachStep === next && metrics.coachStarted) return;
-      metrics.coachStep = next;
-      metrics.coachStarted = true;
-      metrics.coachChangedAt = Date.now();
-      const step = steps[next];
-      updateVisionText('vision-coach-step', `第 ${next + 1} 步 · ${step.title}`);
-      updateVisionText('vision-coach-message', step.message);
-      updateVisionText('vision-mobile-coach-step', `第 ${next + 1} 步 · ${step.title}`);
-      updateVisionText('vision-mobile-coach-message', step.message);
-      renderCoachProgress(metrics, next);
-      if (speak) speakVisionFeedback(step.message, { force:true, interrupt:false });
-    }
-    function repeatCoachPrompt() {
-      const message = document.getElementById('vision-coach-message')?.textContent;
-      if (message) speakVisionFeedback(message, { force:true, interrupt:true });
-    }
-    function gentleCorrection(event) {
-      const messages = {
-        shoulder_height:'很好，肩膀再轻轻放松一点，我们慢慢来。',
-        shoulder_lift:'做得不错，请把肩膀轻轻放下来。',
-        trunk_midline:'不用着急，身体轻轻坐正，再继续动作。',
-        elbow_abduction:'很好，手肘再向身体靠近一点。',
-        palm_orientation:'没关系，请慢慢把手掌翻过去。',
-        wrist_sway:'动作再慢一点，手腕尽量保持稳定。',
-        wrist_flexion:'请把手腕轻轻放平，不需要太用力。',
-        grip_completion:'很好，再试着慢慢握紧，然后把手指舒展开。'
-      };
-      return messages[event.code] || `做得很好，${event.message}，我们慢慢调整。`;
-    }
-    function updateGuidedCoach(metrics, elapsed) {
-      const code = metrics.action.actionCode;
-      let step = 0;
-      if (code === 'touch_opposite_shoulder') {
-        const targetDistance = Number(metrics.actionLive?.[3]?.replace('cm',''));
-        step = elapsed < 2.5 ? 0 : elapsed < 5 ? 1 : targetDistance < 12 ? 2 : elapsed < 10 ? 2 : 3;
-      } else if (code === 'forearm_pronation_supination') {
-        step = elapsed < 2.5 ? 0 : metrics.palmRotationMax < 22 ? 1 : metrics.palmRotationMax < 48 ? 2 : 3;
-      } else if (code === 'hand_grip_release') {
-        step = elapsed < 2.5 ? 0 : metrics.gripReps > 0 ? 3 : metrics.gripPhase === 'closed' ? 2 : 1;
-      } else {
-        step = elapsed < 3 ? 0 : elapsed < 7 ? 1 : elapsed < 12 ? 2 : 3;
-      }
-      setCoachStep(metrics, step);
-    }
-    function angleDifference(a, b) {
-      let diff = Math.abs(a - b) % 360;
-      return diff > 180 ? 360 - diff : diff;
-    }
-    function selectAffectedHand(pts) {
-      const hands = visionRuntime.lastHandResults?.multiHandLandmarks || [];
-      if (!hands.length || !pts.wrist) return null;
-      return hands
-        .map(hand => ({ hand, distance:dist2(hand[0], pts.wrist) }))
-        .sort((a,b) => a.distance - b.distance)[0]?.hand || null;
-    }
-    function palmRotationAngle(hand) {
-      if (!hand?.[0] || !hand?.[5] || !hand?.[17]) return null;
-      const wrist = hand[0];
-      const index = hand[5];
-      const pinky = hand[17];
-      const a = { x:index.x - wrist.x, y:index.y - wrist.y, z:(index.z || 0) - (wrist.z || 0) };
-      const b = { x:pinky.x - wrist.x, y:pinky.y - wrist.y, z:(pinky.z || 0) - (wrist.z || 0) };
-      const normal = {
-        x:a.y * b.z - a.z * b.y,
-        y:a.z * b.x - a.x * b.z,
-        z:a.x * b.y - a.y * b.x
-      };
-      return Math.atan2(normal.z, normal.x) * 180 / Math.PI;
-    }
-    function handOpenness(hand) {
-      if (!hand?.[0]) return null;
-      const ratios = [[8,5],[12,9],[16,13],[20,17]].map(([tip,mcp]) => {
-        const base = dist2(hand[mcp], hand[0]);
-        return base > .005 ? dist2(hand[tip], hand[0]) / base : 0;
-      }).filter(Boolean);
-      return mean(ratios);
-    }
-    function ruleThreshold(action, code, fallback) {
-      return Number((action.recognitionRules || []).find(rule => rule.code === code)?.threshold ?? fallback);
-    }
-    function recordRuleEvent(metrics, event) {
-      const existing = metrics.ruleEvents.find(item => item.code === event.code);
-      if (existing) {
-        existing.count += 1;
-        existing.lastValue = event.value;
-        existing.maxValue = Math.max(existing.maxValue, event.value);
-        existing.lastAt = new Date().toISOString();
-      } else {
-        metrics.ruleEvents.push({
-          ...event,
-          count:1,
-          firstAt:new Date().toISOString(),
-          lastAt:new Date().toISOString(),
-          lastValue:event.value,
-          maxValue:event.value
-        });
-      }
-    }
-    function evaluateActionRules(metrics, pts, hand, elapsed) {
-      const code = metrics.action.actionCode;
-      if (!code) return [];
-      const shoulderWidth = metrics.baseShoulderWidth || dist2(pts.shoulder, pts.otherShoulder);
-      const cmPerNorm = 38 / Math.max(.12, shoulderWidth);
-      const shoulderMid = midpoint(pts.shoulder, pts.otherShoulder);
-      const hipMid = midpoint(pts.hip, pts.otherHip);
-      const active = [];
-      const add = (ruleCode, value, threshold, unit, severity, message, triggered) => {
-        if (!triggered) return;
-        const event = { code:ruleCode, value:Number(value.toFixed(1)), threshold, unit, severity, message };
-        active.push(event);
-        recordRuleEvent(metrics, event);
-      };
-
-      if (code === 'touch_opposite_shoulder') {
-        const shoulderHeight = Math.abs((pts.shoulder?.y || 0) - (pts.otherShoulder?.y || 0)) * cmPerNorm;
-        const trunkShift = Math.abs((shoulderMid?.x || 0) - (hipMid?.x || 0)) * cmPerNorm;
-        const elbowAbduction = angleAt(pts.elbow, pts.shoulder, pts.hip);
-        const targetDistance = dist2(pts.wrist, pts.otherShoulder) * cmPerNorm;
-        metrics.actionLive = [
-          `${shoulderHeight.toFixed(1)}cm`,
-          `${trunkShift.toFixed(1)}cm`,
-          `${elbowAbduction.toFixed(0)}°`,
-          `${targetDistance.toFixed(1)}cm`
-        ];
-        const shoulderThreshold = ruleThreshold(metrics.action, 'shoulder_height', 4);
-        const trunkThreshold = ruleThreshold(metrics.action, 'trunk_midline', 3);
-        const elbowThreshold = ruleThreshold(metrics.action, 'elbow_abduction', 30);
-        add('shoulder_height', shoulderHeight, shoulderThreshold, 'cm', 'warning', '耸肩代偿', shoulderHeight > shoulderThreshold);
-        add('trunk_midline', trunkShift, trunkThreshold, 'cm', 'warning', '躯干侧倾代偿', trunkShift > trunkThreshold);
-        add('elbow_abduction', elbowAbduction, elbowThreshold, 'deg', 'warning', '肘外翻代偿', elbowAbduction > elbowThreshold);
-      }
-
-      if (code === 'forearm_pronation_supination') {
-        const shoulderLift = Math.max(0, (metrics.startShoulderY - (pts.shoulder?.y || metrics.startShoulderY)) * cmPerNorm);
-        const wristSway = dist2(metrics.startWrist, pts.wrist) * cmPerNorm;
-        const palmAngle = palmRotationAngle(hand);
-        if (palmAngle !== null) {
-          if (metrics.startPalmAngle === null) metrics.startPalmAngle = palmAngle;
-          metrics.palmRotationMax = Math.max(metrics.palmRotationMax, angleDifference(palmAngle, metrics.startPalmAngle));
-        }
-        metrics.actionLive = [
-          `${metrics.palmRotationMax.toFixed(0)}°`,
-          `${shoulderLift.toFixed(1)}cm`,
-          `${wristSway.toFixed(1)}cm`,
-          hand ? '已识别' : '未识别'
-        ];
-        const palmThreshold = ruleThreshold(metrics.action, 'palm_orientation', 18);
-        const shoulderThreshold = ruleThreshold(metrics.action, 'shoulder_lift', 3);
-        const wristThreshold = ruleThreshold(metrics.action, 'wrist_sway', 4);
-        add('palm_orientation', metrics.palmRotationMax, palmThreshold, 'deg', 'prompt', '请翻转手腕', elapsed > 3 && metrics.palmRotationMax < palmThreshold);
-        add('shoulder_lift', shoulderLift, shoulderThreshold, 'cm', 'warning', '抬肩代偿', shoulderLift > shoulderThreshold);
-        add('wrist_sway', wristSway, wristThreshold, 'cm', 'prompt', '保持手腕稳定，用前臂旋转', wristSway > wristThreshold);
-      }
-
-      if (code === 'hand_grip_release') {
-        const shoulderLift = Math.max(0, (metrics.startShoulderY - (pts.shoulder?.y || metrics.startShoulderY)) * cmPerNorm);
-        const wristAngle = hand?.[9] ? Math.abs(180 - angleAt(pts.elbow, pts.wrist, hand[9])) : 0;
-        const openness = handOpenness(hand);
-        if (openness !== null) {
-          metrics.handOpenMin = Math.min(metrics.handOpenMin, openness);
-          metrics.handOpenMax = Math.max(metrics.handOpenMax, openness);
-          if (openness < 1.38 && metrics.gripPhase !== 'closed') metrics.gripPhase = 'closed';
-          if (openness > 1.72 && metrics.gripPhase === 'closed') {
-            metrics.gripReps += 1;
-            metrics.gripPhase = 'open';
-          }
-        }
-        const gripCompletion = Number.isFinite(metrics.handOpenMin) ? clamp((metrics.handOpenMax - metrics.handOpenMin) / .55 * 100, 0, 100) : 0;
-        metrics.actionLive = [
-          `${gripCompletion}%`,
-          `${shoulderLift.toFixed(1)}cm`,
-          `${wristAngle.toFixed(0)}°`,
-          `${metrics.gripReps}次`
-        ];
-        const shoulderThreshold = ruleThreshold(metrics.action, 'shoulder_lift', 3);
-        const wristThreshold = ruleThreshold(metrics.action, 'wrist_flexion', 35);
-        const gripThreshold = ruleThreshold(metrics.action, 'grip_completion', 65);
-        add('shoulder_lift', shoulderLift, shoulderThreshold, 'cm', 'warning', '耸肩代偿', shoulderLift > shoulderThreshold);
-        add('wrist_flexion', wristAngle, wristThreshold, 'deg', 'warning', '手腕代偿用力', wristAngle > wristThreshold);
-        add('grip_completion', gripCompletion, gripThreshold, '%', 'prompt', '尽量握紧/完全张开', elapsed > 3 && gripCompletion < gripThreshold);
-      }
-      return active;
-    }
-    function updateActionLiveMetrics(metrics, fallback) {
-      const values = metrics?.actionLive || fallback;
-      const ids = ['vision-live-score','vision-live-jerk','vision-live-amplitude','vision-live-confidence'];
-      ids.forEach((id,index) => updateVisionText(id, values[index] ?? '-'));
-    }
-    function showRuleFeedback(events, action) {
-      const box = document.getElementById('vision-rule-feedback');
-      if (!box) return;
-      if (!events.length) {
-        box.className = 'rounded-2xl bg-green-50 border border-green-100 p-4 text-sm font-black text-success';
-        box.textContent = '动作保持得很好，请继续按照舒适的节奏完成。';
-        return;
-      }
-      const hasWarning = events.some(event => event.severity === 'warning');
-      const primary = events[0];
-      const message = gentleCorrection(primary);
-      box.className = `rounded-2xl border p-4 text-sm font-black ${hasWarning ? 'bg-orange-50 border-orange-100 text-orange-700' : 'bg-amber-50 border-amber-100 text-amber-700'}`;
-      box.textContent = `${message} 当前测量：${primary.value}${primary.unit}`;
-      speakVisionFeedback(message, { minGap:9000 });
     }
     function trunkDeviation(pts) {
       const shoulderMid = midpoint(pts.shoulder, pts.otherShoulder);
@@ -829,14 +611,10 @@
       if (modeName === '步态模式') return '请把手机或电脑放远一点，让头部、髋部、膝盖和脚踝尽量同时入镜。';
       if (modeName === '转移模式') return '请后退半步，让肩、髋、膝、踝都进入画面，侧前方拍摄更稳定。';
       if (modeName === '平衡模式') return '请保持上半身和髋部完整入镜，镜头尽量与胸口同高。';
-      if (modeName === '上肢精细模式') return '请让双肩、患侧肘腕和整只手完整入镜，五个指尖不要被桌面或衣物遮挡。';
       return '请让肩、肘、手腕完整入镜，避免手臂离开画面边缘。';
     }
     function visualModeForAction(action = {}) {
       const text = `${action.category || ''}${action.name || ''}`;
-      if (action.actionCode === 'touch_opposite_shoulder') return { mode:'上肢精细模式', actionCode:action.actionCode, needsHand:false, points:['双肩','双髋','患侧肘','患侧腕'], count:8, ratio:76, focus:'肩高差、躯干中线、肘外展角度' };
-      if (action.actionCode === 'forearm_pronation_supination') return { mode:'上肢精细模式', actionCode:action.actionCode, needsHand:true, points:['双肩','患侧肘','患侧腕','患侧手21点'], count:25, ratio:24, focus:'手掌翻转、肩部上提、手腕稳定性' };
-      if (action.actionCode === 'hand_grip_release') return { mode:'上肢精细模式', actionCode:action.actionCode, needsHand:true, points:['双肩','患侧肘','患侧腕','患侧手21点'], count:25, ratio:24, focus:'肩部上提、腕关节屈曲、抓握张开完成度' };
       if (/步态|步行|行走/.test(text)) return { mode:'步态模式', points:['双髋','双膝','双踝','足跟/足尖','躯干'], count:15, ratio:55, focus:'步幅、膝关节控制、步行稳定性' };
       if (/ADL|转移|坐站|站立|下肢/.test(text)) return { mode:'转移模式', points:['躯干','髋','膝','踝','手部支撑点'], count:14, ratio:58, focus:'起立稳定性、下肢负重、跌倒风险姿势' };
       if (/平衡|重心/.test(text)) return { mode:'平衡模式', points:['双肩','双髋','躯干中线','膝部参考点'], count:12, ratio:64, focus:'躯干偏移、重心转移、坐站稳定性' };
@@ -865,6 +643,11 @@
       return degrees(Math.acos(Math.max(-1, Math.min(1, dot / mag))));
     }
     function mean(values) { return values.length ? values.reduce((s,n) => s + n, 0) / values.length : 0; }
+    function percentile(values, ratio = .9) {
+      if (!values.length) return 0;
+      const sorted = [...values].sort((a,b) => a - b);
+      return sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * ratio)))];
+    }
     function variance(values) {
       const avg = mean(values);
       return values.length ? mean(values.map(n => (n - avg) ** 2)) : 0;
@@ -924,14 +707,6 @@
       return { sessions, avgSmoothness, avgConfidence, trueSessions, visionRisks };
     }
     function visionSourceText(session) { return session?.source === 'camera' ? '真实采集' : '演示样本'; }
-    function visionSessionMetricText(session) {
-      const action = state.visualActions.find(item => item.id === session.actionId);
-      if (action && session.actionMetrics?.length) {
-        const labels = visionActionUi(action).labels;
-        return labels.map((label,index) => `${label}${session.actionMetrics[index] ?? '-'}`).join('，');
-      }
-      return `平滑度${session.smoothnessScore}，Jerk峰值${session.jerkPeak}，补偿置信度${session.compensationConfidence}%`;
-    }
     function ensureVisionAlerts(p, alerts) {
       const latest = latestVision(p);
       const hasVisualAlert = alerts.some(a => a.id === `VIS-${p.id}`);
@@ -983,9 +758,7 @@
       }
       p.logs.push({
         date:todayText(),
-        actionId:session.actionId || null,
         done:true,
-        duration:Math.max(1, Math.round(Number(session.duration) / 60)),
         pain:Math.max(0, Math.min(10, p.assessment.pain || 0)),
         fatigue:Math.max(0, Math.min(10, p.assessment.fatigue || 3)),
         dizzy:false,
@@ -1484,36 +1257,40 @@
       const sessions = (visionProfile(p).sessions || []).slice().reverse();
       const mode = visualModeForAction({ name:v.action, category:v.recognitionMode });
       const planActions = activePlan(p)?.actions || [];
-      const availableActions = [...state.visualActions, ...planActions].filter((action, index, all) => all.findIndex(item => item.id === action.id) === index);
       const patientOptions = accessiblePatients().map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name} · ${x.id} · ${x.risk}</option>`).join('');
-      if (!availableActions.some(action => action.id === state.selectedVisionActionId)) state.selectedVisionActionId = availableActions[0]?.id || 'default';
-      const actionOptions = (availableActions.length ? availableActions : [{ id:'default', name:'坐姿患侧上肢前伸训练', category:'上肢' }]).map(a => `<option value="${a.id || 'default'}" ${a.id === state.selectedVisionActionId ? 'selected' : ''}>${a.name} · ${a.category}</option>`).join('');
-      setTitle('AI动作视觉训练', '根据当前动作切换识别点、阈值、实时指标和语音反馈');
+      const actionOptions = (planActions.length ? planActions : [{ id:'default', name:'坐姿患侧上肢前伸训练', category:'上肢' }]).map((a,i) => `<option value="${a.id || 'default'}" ${i === 0 ? 'selected' : ''}>${a.name} · ${a.category}</option>`).join('');
+      setTitle('AI视觉原创点融合', '原创点二、三、四已接入训练处方、患者画像、风险预警和阶段报告');
       document.getElementById('content').innerHTML = `
         <div class="card p-6 mb-6 border-l-8 border-l-primary">
           <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-5 mb-5">
             <div>
               <h3 class="text-2xl font-black"><i class="fa-solid fa-video text-primary mr-2"></i>真实摄像头视觉训练</h3>
-              <p id="vision-training-summary" class="text-sm text-slate-500 mt-2">选择动作后，系统会加载该动作专属的识别点、阈值和反馈规则。</p>
+              <p class="text-sm text-slate-500 mt-2">打开摄像头后先完成骨长校准，再开始训练。系统会基于真实关键点计算V-MAS平滑度、2.5D补偿和处方剪枝性能指标。</p>
             </div>
             <span id="vision-status" class="badge bg-slate-100 text-slate-600 border border-slate-200">摄像头未启动</span>
           </div>
-          <div class="vision-training-layout">
-            <div class="space-y-3 min-w-0">
-              <div id="vision-stage" class="vision-stage rounded-3xl bg-slate-950 overflow-hidden relative min-h-[320px]">
-                <video id="vision-video" autoplay playsinline webkit-playsinline muted class="absolute inset-0 w-full h-full object-contain bg-slate-950" style="display:block;"></video>
-                <canvas id="vision-canvas" class="absolute inset-0 w-full h-full min-h-[320px] object-contain" style="pointer-events:none;"></canvas>
-                <div id="vision-mobile-coach" class="xl:hidden absolute left-3 right-3 bottom-3 z-20 rounded-2xl bg-slate-950/80 border border-white/20 px-4 py-3 text-white backdrop-blur-sm">
-                  <p id="vision-mobile-coach-step" class="text-[11px] font-black text-teal-300">温和陪练</p>
-                  <p id="vision-mobile-coach-message" class="text-sm font-black leading-5 mt-1">准备好后，我们会一步一步慢慢完成。</p>
+          <div class="grid xl:grid-cols-[1.15fr_.85fr] gap-6">
+            <div id="vision-stage" class="vision-stage rounded-3xl bg-slate-950 overflow-hidden relative min-h-[320px]">
+              <video id="vision-video" autoplay playsinline webkit-playsinline muted class="absolute inset-0 w-full h-full object-contain bg-slate-950" style="display:block;"></video>
+              <canvas id="vision-canvas" class="absolute inset-0 w-full h-full min-h-[320px] object-contain" style="pointer-events:none;"></canvas>
+              <div id="vision-alert-overlay" class="vision-alert-overlay">
+                <div class="vision-alert-box">
+                  <p class="text-2xl md:text-3xl font-black mb-2"><i class="fa-solid fa-triangle-exclamation mr-2"></i>异常警报</p>
+                  <p id="vision-alert-text" class="text-base md:text-lg font-black leading-7">检测到异常姿态，请立即停止训练。</p>
+                  <p class="text-xs md:text-sm mt-2 opacity-90">系统已记录本次风险信号，保存训练后会进入风险预警闭环。</p>
                 </div>
-                <div id="vision-alert-overlay" class="vision-alert-overlay">
-                  <div class="vision-alert-box">
-                    <p class="text-2xl md:text-3xl font-black mb-2"><i class="fa-solid fa-triangle-exclamation mr-2"></i>异常警报</p>
-                    <p id="vision-alert-text" class="text-base md:text-lg font-black leading-7">检测到异常姿态，请立即停止训练。</p>
-                    <p class="text-xs md:text-sm mt-2 opacity-90">系统已记录本次风险信号，保存训练后会进入风险预警闭环。</p>
-                  </div>
-                </div>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-3">
+              <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p class="font-black text-slate-500">实时平滑度</p><p id="vision-live-score" class="text-xl font-black text-primary">-</p></div>
+              <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p class="font-black text-slate-500">Jerk峰值</p><p id="vision-live-jerk" class="text-xl font-black text-accent">-</p></div>
+              <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p class="font-black text-slate-500">补偿幅度</p><p id="vision-live-amplitude" class="text-xl font-black text-success">-</p></div>
+              <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p class="font-black text-slate-500">置信度</p><p id="vision-live-confidence" class="text-xl font-black text-violet-700">-</p></div>
+            </div>
+            <div class="space-y-4">
+              <div class="grid md:grid-cols-2 gap-3">
+                ${canSeeAll() ? `<label class="font-black text-sm">训练患者<select id="vision-patient-select" class="input mt-2" onchange="changeVisionPatient(this.value)">${patientOptions}</select></label>` : `<div class="rounded-2xl bg-slate-50 border border-slate-100 p-4"><p class="text-xs font-black text-slate-400">训练患者</p><p class="font-black mt-1">${p.name} · ${p.id}</p></div>`}
+                <label class="font-black text-sm">本次训练动作<select id="vision-action-select" class="input mt-2">${actionOptions}</select></label>
               </div>
               <div class="grid grid-cols-2 gap-3">
                 <button id="vision-open-btn" onclick="startVisionCamera()" class="py-3 rounded-2xl bg-primary text-white font-black"><i class="fa-solid fa-video mr-2"></i>打开摄像头</button>
@@ -1522,49 +1299,68 @@
                 <button id="vision-save-btn" onclick="finishRealVisionTraining()" class="py-3 rounded-2xl bg-success text-white font-black"><i class="fa-solid fa-floppy-disk mr-2"></i>结束保存</button>
                 <button id="vision-stop-btn" onclick="stopVisionCamera()" class="col-span-2 py-3 rounded-2xl bg-slate-100 text-slate-700 font-black"><i class="fa-solid fa-stop mr-2"></i>关闭摄像头</button>
               </div>
-              <div id="vision-rule-feedback" class="rounded-2xl bg-slate-50 border border-slate-100 p-4 text-sm font-black text-slate-500">尚未开始动作规则判定</div>
               <div>
                 <div class="flex items-center justify-between text-xs font-black text-slate-500 mb-2"><span id="vision-live-phase">待启动</span><span id="vision-live-duration">0.0s</span></div>
                 <div class="vision-meter"><span id="vision-progress"></span></div>
               </div>
-              <div id="vision-action-guide" class="rounded-2xl bg-blue-50 border border-blue-100 p-4 text-sm leading-6"></div>
-              <div id="vision-training-steps" class="rounded-3xl bg-slate-50 border border-slate-100 p-5 text-sm leading-7">
+              <div class="rounded-3xl bg-slate-50 border border-slate-100 p-5 text-sm leading-7">
                 <p class="font-black text-primary mb-2">真实训练步骤</p>
-                <p>正在加载当前动作步骤...</p>
+                <p>1. 浏览器允许摄像头权限。</p>
+                <p>2. 患者坐稳，患侧上肢完整出现在画面中。</p>
+                <p>3. 点击“校准骨长”，记录肩-肘、肘-腕基准。</p>
+                <p>4. 点击“开始训练”，完成当前处方动作。</p>
+                <p>5. 点击“结束保存”，真实数据会进入画像、打卡、评估、预警和报告。</p>
               </div>
               <div class="grid grid-cols-2 gap-3">
                 ${visionStat('采集帧数', '<span id="vision-live-frames">0</span>', 'fa-images', 'text-primary')}
                 ${visionStat('实时帧率', '<span id="vision-live-fps">-</span>', 'fa-gauge-high', 'text-success')}
-                ${visionStat('当前模式', '<span id="vision-current-mode">-</span>', 'fa-person-rays', 'text-violet-700')}
-                ${visionStat('识别关键点', '<span id="vision-current-points">-</span>', 'fa-diagram-project', 'text-violet-700')}
-              </div>
-            </div>
-            <div class="vision-side-panel space-y-4">
-              <div id="vision-coach-card" class="rounded-2xl bg-teal-50 border border-teal-100 p-4">
-                <div class="flex items-start gap-3">
-                  <div class="w-10 h-10 shrink-0 rounded-full bg-white text-accent grid place-items-center"><i class="fa-solid fa-heart"></i></div>
-                  <div class="min-w-0 flex-1">
-                    <p id="vision-coach-step" class="text-xs font-black text-accent">温和陪练</p>
-                    <p id="vision-coach-message" class="font-black text-slate-700 mt-1 leading-6">准备好后，我们会一步一步慢慢完成。</p>
-                  </div>
-                  <button onclick="repeatCoachPrompt()" class="w-10 h-10 shrink-0 rounded-full bg-white text-accent border border-teal-100" title="重复当前语音提示" aria-label="重复当前语音提示"><i class="fa-solid fa-volume-high"></i></button>
-                </div>
-                <div id="vision-coach-progress" class="grid grid-cols-4 gap-2 mt-4"></div>
-              </div>
-              <div id="vision-training-selection" class="grid gap-3">
-                ${canSeeAll() ? `<label class="font-black text-sm">训练患者<select id="vision-patient-select" class="input mt-2" onchange="changeVisionPatient(this.value)">${patientOptions}</select></label>` : `<div class="rounded-2xl bg-slate-50 border border-slate-100 p-4"><p class="text-xs font-black text-slate-400">训练患者</p><p class="font-black mt-1">${p.name} · ${p.id}</p></div>`}
-                <label class="font-black text-sm">选择训练项目<select id="vision-action-select" class="input mt-2" onchange="changeVisionAction(this.value)">${actionOptions}</select></label>
-              </div>
-              <div id="vision-live-metrics" class="grid grid-cols-2 gap-2 text-xs">
-                <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p id="vision-live-label-1" class="font-black text-slate-500">指标一</p><p id="vision-live-score" class="text-xl font-black text-primary">-</p></div>
-                <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p id="vision-live-label-2" class="font-black text-slate-500">指标二</p><p id="vision-live-jerk" class="text-xl font-black text-accent">-</p></div>
-                <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p id="vision-live-label-3" class="font-black text-slate-500">指标三</p><p id="vision-live-amplitude" class="text-xl font-black text-success">-</p></div>
-                <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p id="vision-live-label-4" class="font-black text-slate-500">指标四</p><p id="vision-live-confidence" class="text-xl font-black text-violet-700">-</p></div>
+                ${visionStat('当前模式', v.recognitionMode, 'fa-person-rays', 'text-violet-700')}
+                ${visionStat('保留关键点', v.retainedKeypoints + '/33', 'fa-diagram-project', 'text-violet-700')}
               </div>
             </div>
           </div>
         </div>
-        <div id="vision-action-analysis" class="mb-6"></div>
+        <div class="grid xl:grid-cols-[1.1fr_.9fr] gap-6 mb-6">
+          <div class="card p-7 bg-[linear-gradient(135deg,#ffffff,#eff6ff)]">
+            <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+              <div><p class="text-sm font-black text-primary">${p.name} · ${p.id}</p><h3 class="text-3xl font-black mt-1">AI视觉训练质量推演</h3><p class="text-slate-500 mt-2">${visionProfile(p).summary}</p></div>
+              <span class="badge ${visionRiskClass(v.riskLevel)}">${v.riskLevel}</span>
+            </div>
+            <div class="grid md:grid-cols-4 gap-3 mt-6">
+              ${visionStat('V-MAS平滑度', v.smoothnessScore, 'fa-wave-square', v.smoothnessScore >= 70 ? 'text-success' : 'text-danger')}
+              ${visionStat('Jerk峰值', v.jerkPeak, 'fa-bolt', v.jerkPeak > 3 ? 'text-danger' : 'text-accent')}
+              ${visionStat('补偿置信度', v.compensationConfidence + '%', 'fa-cube', v.compensationConfidence >= 75 ? 'text-primary' : 'text-warning')}
+              ${visionStat('平均帧率', v.avgFps + ' FPS', 'fa-gauge-high', v.avgFps >= 28 ? 'text-success' : 'text-warning')}
+            </div>
+            <div class="grid md:grid-cols-3 gap-4 mt-6 text-sm leading-6">
+              <div class="rounded-2xl bg-white border border-blue-100 p-4"><p class="font-black text-primary">原创点二：V-MAS</p><p class="mt-2">用普通摄像头追踪患侧手腕轨迹，计算Jerk峰值、方差和平滑度评分，辅助提示动作卡顿、抖动和疑似动作控制异常。</p></div>
+              <div class="rounded-2xl bg-white border border-teal-100 p-4"><p class="font-black text-accent">原创点三：2.5D补偿</p><p class="mt-2">训练前记录肩-肘、肘-腕基准骨长，训练中根据投影缩短率估计前伸角度，降低二维画面误判动作幅度的风险。</p></div>
+              <div class="rounded-2xl bg-white border border-violet-100 p-4"><p class="font-black text-violet-700">原创点四：处方剪枝</p><p class="mt-2">从当前训练计划读取动作类别，只让相关关键点进入医学计算和画面渲染，减少普通设备上的延迟和卡顿。</p></div>
+            </div>
+          </div>
+          <div class="space-y-6">
+            <div class="card p-6">
+              <h3 class="text-xl font-black mb-4"><i class="fa-solid fa-ruler-combined text-accent mr-2"></i>2.5D校准与补偿</h3>
+              <div class="grid gap-3 text-sm">
+                ${visionStat('上臂基准骨长', visionProfile(p).calibration.upperArmBaseline + 'px', 'fa-bone', 'text-accent')}
+                ${visionStat('前臂基准骨长', visionProfile(p).calibration.forearmBaseline + 'px', 'fa-bone', 'text-accent')}
+                ${visionStat('估计前伸角度', v.estimatedReachAngle + '°', 'fa-location-arrow', 'text-primary')}
+                ${visionStat('补偿后动作幅度', v.compensatedAmplitude + '%', 'fa-arrow-up-right-dots', 'text-success')}
+              </div>
+              <p class="mt-4 text-sm leading-7 text-slate-600">摄像头位置：${visionProfile(p).calibration.cameraPosition}。当置信度低于70%时，系统只提示调整摄像头，不直接判定动作错误。</p>
+            </div>
+            <div class="card p-6">
+              <h3 class="text-xl font-black mb-4"><i class="fa-solid fa-microchip text-violet-700 mr-2"></i>处方驱动剪枝</h3>
+              <div class="grid gap-3 text-sm">
+                ${visionStat('识别模式', v.recognitionMode, 'fa-person-rays', 'text-violet-700')}
+                ${visionStat('保留关键点', v.retainedKeypoints + '/33', 'fa-diagram-project', 'text-violet-700')}
+                ${visionStat('剪枝比例', v.pruningRatio + '%', 'fa-scissors', 'text-success')}
+                ${visionStat('响应延迟', v.latency + 'ms', 'fa-clock', v.latency <= 140 ? 'text-success' : 'text-warning')}
+              </div>
+              <p class="mt-4 text-sm leading-7 text-slate-600">重点追踪：${v.trackedPoints.join('、')}。主要目标：${mode.focus}。</p>
+            </div>
+          </div>
+        </div>
         <div class="grid xl:grid-cols-[.95fr_1.05fr] gap-6">
           <div class="card p-6">
             <div class="flex items-center justify-between gap-4 mb-5">
@@ -1573,7 +1369,7 @@
             </div>
             <div class="space-y-3">${sessions.map(s => `<div class="rounded-2xl bg-slate-50 p-4 border border-slate-100">
               <div class="flex flex-wrap items-center justify-between gap-3"><p class="font-black">${s.date} · ${s.action}</p><div class="flex flex-wrap gap-2"><span class="badge bg-blue-50 text-primary border border-blue-100">${visionSourceText(s)}</span><span class="badge ${visionRiskClass(s.riskLevel)}">${s.riskLevel}</span></div></div>
-              <p class="text-sm text-slate-600 mt-2">${visionSessionMetricText(s)}，${s.recognitionMode}，延迟${s.latency}ms。</p>
+              <p class="text-sm text-slate-600 mt-2">平滑度${s.smoothnessScore}，Jerk峰值${s.jerkPeak}，补偿置信度${s.compensationConfidence}%，${s.recognitionMode}，延迟${s.latency}ms。</p>
               <p class="text-xs text-primary font-black mt-2">捕捉重点：${s.targetLabel || (s.recognitionMode === '平衡模式' ? '躯干中线' : s.recognitionMode === '转移模式' ? '髋部起立轨迹' : s.recognitionMode === '步态模式' ? '踝足步态轨迹' : '患侧手腕轨迹')}</p>
               <p class="text-xs text-slate-500 mt-2">${s.suggestion}</p>
             </div>`).join('')}</div>
@@ -1591,7 +1387,6 @@
         </div>`;
       setVisionButtonState();
       setVisionPhase('待启动', 0);
-      updateVisionActionGuide();
     }
     function simulateVisionSession() {
       const p = patient(accessiblePatientId());
@@ -1600,17 +1395,9 @@
       const last = latestVision(p);
       const mode = visualModeForAction(action);
       const score = clamp(last.smoothnessScore + (last.smoothnessScore < 70 ? 4 : -2), 35, 96);
-      const simulatedActionMetrics = action.actionCode === 'touch_opposite_shoulder'
-        ? ['2.8cm','1.6cm','24°','5.2cm']
-        : action.actionCode === 'forearm_pronation_supination'
-          ? ['62°','1.4cm','2.2cm','已识别']
-          : action.actionCode === 'hand_grip_release'
-            ? ['82%','1.2cm','18°','6次']
-            : [];
       const session = {
         ...last,
         date:todayText(),
-        actionId:action.id,
         action:action.name,
         smoothnessScore:score,
         jerkPeak:Number(Math.max(.8, last.jerkPeak - .3).toFixed(1)),
@@ -1629,7 +1416,6 @@
         source:'demo',
         duration:12,
         frameCount:Math.max(120, last.frameCount || 120),
-        actionMetrics:simulatedActionMetrics,
         suggestion:score >= 70 ? '动作平滑度较前改善，可继续当前处方并保持摄像头校准。' : '动作仍不稳定，建议治疗师复核训练强度。'
       };
       applyVisionSessionToPatient(p, session);
@@ -1673,105 +1459,9 @@
     }
     function currentVisionAction(p) {
       const plan = activePlan(p);
-      const actions = [...state.visualActions, ...(plan?.actions || [])].filter((action, index, all) => all.findIndex(item => item.id === action.id) === index);
-      const selected = document.getElementById('vision-action-select')?.value || state.selectedVisionActionId;
+      const actions = plan?.actions || [];
+      const selected = document.getElementById('vision-action-select')?.value;
       return actions.find(a => a.id === selected) || actions[0] || { id:'default', name:'坐姿患侧上肢前伸训练', category:'上肢' };
-    }
-    function visionActionUi(action) {
-      const generic = {
-        summary:'追踪当前处方对应的人体关键点，记录动作平滑度、幅度与识别置信度。',
-        labels:['动作平滑度','Jerk峰值','动作幅度','识别置信度'],
-        steps:['允许浏览器使用摄像头。','让训练相关身体部位完整进入画面。','完成骨段校准。','开始训练并按处方完成动作。','结束后保存训练记录。'],
-        capture:'MediaPipe Pose 身体姿态点',
-        algorithm:'通用动作轨迹与平滑度分析',
-        camera:'镜头与训练部位同高，避免逆光和遮挡。'
-      };
-      if (action.actionCode === 'touch_opposite_shoulder') return {
-        summary:'动作1专属识别：使用双肩、双髋、患侧肘和患侧腕，实时判断耸肩、躯干侧倾和肘外翻。',
-        labels:['双肩高度差','躯干中线偏移','肘外展角度','手腕距对侧肩'],
-        steps:['患者端坐，肩、肘、腕和髋部完整入镜。','患侧手从自然位缓慢抬起。','患侧手触摸对侧肩膀，肘部自然向内。','保持躯干正直，不耸肩、不侧倾。','缓慢返回起始位后结束保存。'],
-        capture:'Pose：双肩、双髋、患侧肘、患侧腕',
-        algorithm:'肩高差换算、躯干中线偏移、肩-肘-髋夹角',
-        camera:'摄像头正前方、接近胸口高度，上半身和髋部完整入镜。'
-      };
-      if (action.actionCode === 'forearm_pronation_supination') return {
-        summary:'动作2专属识别：融合身体姿态点与患侧手21点，判断手掌是否翻转、肩部是否上提以及手腕是否晃动。',
-        labels:['手掌翻转角','肩部上提','手腕晃动','手部识别状态'],
-        steps:['患者端坐，患侧前臂平放桌面。','肩膀放松，肘和前臂尽量保持不动。','缓慢将手掌向上翻转。','再缓慢将手掌向下翻转，避免手腕左右晃动。','完成规定次数后结束保存。'],
-        capture:'Pose + Hands：肩、肘、腕及患侧手21点',
-        algorithm:'手掌法向量旋转角、肩部垂直位移、腕点平面位移',
-        camera:'摄像头斜前上方，必须清楚看到手掌、手背、患侧肩和肘。'
-      };
-      if (action.actionCode === 'hand_grip_release') return {
-        summary:'动作3专属识别：融合身体姿态点与患侧手21点，判断握拳与张开完成度、腕屈代偿、耸肩及完成次数。',
-        labels:['抓握张开完成度','肩部抬高','腕关节屈曲','完成次数'],
-        steps:['患者端坐，患侧手掌平放桌面并完整入镜。','肩膀放松，手腕保持平直。','缓慢握拳，尽量完成抓握。','再缓慢完全张开五指。','重复抓握和张开，达到次数后结束保存。'],
-        capture:'Pose + Hands：肩、肘、腕及患侧手21点',
-        algorithm:'指尖-掌根距离比、肘-腕-掌指夹角、开合状态机计数',
-        camera:'摄像头斜前上方，五个指尖、掌根、手腕和肩部均需可见。'
-      };
-      return generic;
-    }
-    function changeVisionAction(actionId) {
-      if (visionRuntime.training) {
-        openToast('训练进行中不能切换动作，请先结束或关闭摄像头。');
-        const select = document.getElementById('vision-action-select');
-        if (select) select.value = state.selectedVisionActionId;
-        return;
-      }
-      state.selectedVisionActionId = actionId;
-      updateVisionActionGuide();
-    }
-    function updateVisionActionGuide() {
-      const p = patient(accessiblePatientId());
-      const action = currentVisionAction(p);
-      const rules = action.recognitionRules || [];
-      const mode = visualModeForAction(action);
-      const ui = visionActionUi(action);
-      const guide = document.getElementById('vision-action-guide');
-      if (!guide) return;
-      guide.innerHTML = `
-        <p class="font-black text-primary">${action.name}</p>
-        <p class="mt-1 text-slate-600">${action.instruction || action.description || action.safety || '请按治疗师处方完成动作。'}</p>
-        ${rules.length ? `<div class="mt-3 grid gap-1 text-xs text-slate-600">${rules.map(rule => `<p><i class="fa-solid fa-crosshairs text-primary mr-2"></i>${rule.metric} ${rule.operator} ${rule.threshold}${rule.unit}：${rule.message}</p>`).join('')}</div>` : ''}
-        ${action.voiceFeedback ? `<p class="mt-3 text-xs font-black text-accent"><i class="fa-solid fa-volume-high mr-2"></i>语音：${action.voiceFeedback}</p>` : ''}
-      `;
-      updateVisionText('vision-training-summary', ui.summary);
-      ui.labels.forEach((label, index) => updateVisionText(`vision-live-label-${index + 1}`, label));
-      ['vision-live-score','vision-live-jerk','vision-live-amplitude','vision-live-confidence'].forEach(id => updateVisionText(id, '-'));
-      updateVisionText('vision-current-mode', mode.mode);
-      updateVisionText('vision-current-points', `${mode.count}点`);
-      const steps = document.getElementById('vision-training-steps');
-      if (steps) steps.innerHTML = `<p class="font-black text-primary mb-2">${action.name}训练步骤</p>${ui.steps.map((step,index) => `<p>${index + 1}. ${step}</p>`).join('')}`;
-      const analysis = document.getElementById('vision-action-analysis');
-      if (analysis) analysis.innerHTML = `
-        <div class="grid xl:grid-cols-[1.15fr_.85fr] gap-6">
-          <div class="card p-7 border-l-8 border-l-primary">
-            <p class="text-sm font-black text-primary">当前动作专属算法</p>
-            <h3 class="text-2xl font-black mt-2">${action.name}</h3>
-            <p class="text-slate-600 mt-3 leading-7">${ui.summary}</p>
-            <div class="grid md:grid-cols-3 gap-4 mt-6 text-sm">
-              <div class="rounded-2xl bg-blue-50 border border-blue-100 p-4"><p class="font-black text-primary">采集关键点</p><p class="mt-2 leading-6">${ui.capture}</p></div>
-              <div class="rounded-2xl bg-teal-50 border border-teal-100 p-4"><p class="font-black text-accent">判定方法</p><p class="mt-2 leading-6">${ui.algorithm}</p></div>
-              <div class="rounded-2xl bg-violet-50 border border-violet-100 p-4"><p class="font-black text-violet-700">语音反馈</p><p class="mt-2 leading-6">${action.voiceFeedback || '根据触发规则提供动作纠正提示。'}</p></div>
-            </div>
-          </div>
-          <div class="card p-6">
-            <h3 class="text-xl font-black"><i class="fa-solid fa-camera text-primary mr-2"></i>拍摄与判定条件</h3>
-            <p class="mt-4 text-sm leading-7 text-slate-600">${ui.camera}</p>
-            <div class="mt-4 space-y-3">${rules.map(rule => `<div class="rounded-2xl bg-slate-50 border border-slate-100 p-4"><div class="flex items-center justify-between gap-3"><p class="font-black">${rule.metric}</p><span class="badge ${rule.severity === 'warning' ? 'bg-red-50 text-danger border border-red-100' : 'bg-amber-50 text-amber-700 border border-amber-100'}">${rule.operator} ${rule.threshold}${rule.unit}</span></div><p class="text-sm text-slate-500 mt-2">触发反馈：${rule.message}</p></div>`).join('') || '<p class="text-sm text-slate-500">该处方动作使用通用轨迹质量分析。</p>'}</div>
-          </div>
-        </div>`;
-      const feedback = document.getElementById('vision-rule-feedback');
-      if (feedback) {
-        feedback.className = 'rounded-2xl bg-slate-50 border border-slate-100 p-4 text-sm font-black text-slate-500';
-        feedback.textContent = `等待开始“${action.name}”规则判定`;
-      }
-      updateVisionText('vision-coach-step', '温和陪练');
-      updateVisionText('vision-coach-message', '准备好后，我们会一步一步慢慢完成。');
-      updateVisionText('vision-mobile-coach-step', '温和陪练');
-      updateVisionText('vision-mobile-coach-message', '准备好后，我们会一步一步慢慢完成。');
-      renderCoachProgress({ action }, 0);
     }
     async function startVisionCamera() {
       const video = document.getElementById('vision-video');
@@ -1822,18 +1512,12 @@
           minTrackingConfidence:.42
         });
         visionRuntime.pose.onResults(onPoseResults);
-        let handsReady = false;
-        try { handsReady = await ensureHandLibrariesRobust(); } catch (error) { handsReady = false; }
-        if (handsReady) {
-          visionRuntime.hands = new Hands({ locateFile:file => `${visionRuntime.handsBase || 'https://cdn.jsdelivr.net/npm/@mediapipe/hands'}/${file}` });
-          visionRuntime.hands.setOptions({
-            maxNumHands:2,
-            modelComplexity:1,
-            minDetectionConfidence:.45,
-            minTrackingConfidence:.45
-          });
-          visionRuntime.hands.onResults(onHandResults);
+        if (typeof visionRuntime.pose.initialize === 'function') {
+          setVisionPhase('正在初始化关键点模型', 28);
+          await visionRuntime.pose.initialize();
         }
+        visionRuntime.poseResultAt = performance.now();
+        visionRuntime.poseErrors = 0;
         startVisionPoseLoop(video);
         setVisionStatus('摄像头已打开，等待校准', 'bg-blue-50 text-primary border border-blue-100');
         setVisionPhase('等待骨长校准', 25);
@@ -1878,20 +1562,12 @@
           try {
             await visionRuntime.pose.send({ image:video });
           } catch (error) {
-            setVisionPhase('AI识别暂未返回，请调整光线或刷新页面', 28);
+            visionRuntime.poseErrors += 1;
+            if (visionRuntime.poseErrors === 1 || visionRuntime.poseErrors % 10 === 0) {
+              setVisionPhase('关键点模型运行异常，正在重试', 28);
+            }
           } finally {
             visionRuntime.poseBusy = false;
-          }
-        }
-        if (visionRuntime.hands && !visionRuntime.handsBusy && video.readyState >= 2 && video.videoWidth && now - visionRuntime.lastHandsSentAt > 100) {
-          visionRuntime.lastHandsSentAt = now;
-          visionRuntime.handsBusy = true;
-          try {
-            await visionRuntime.hands.send({ image:video });
-          } catch (error) {
-            visionRuntime.lastHandResults = null;
-          } finally {
-            visionRuntime.handsBusy = false;
           }
         }
         visionRuntime.raf = requestAnimationFrame(loop);
@@ -1922,19 +1598,18 @@
       visionRuntime.camera = null;
       visionRuntime.stream = null;
       visionRuntime.pose = null;
-      visionRuntime.hands = null;
-      visionRuntime.lastHandResults = null;
       visionRuntime.running = false;
       visionRuntime.metrics = null;
       visionRuntime.lastFrameTime = 0;
       visionRuntime.alarmFrames = 0;
+      visionRuntime.alarmSafeFrames = 0;
       visionRuntime.poseFrames = 0;
       visionRuntime.poseBusy = false;
-      visionRuntime.handsBusy = false;
       visionRuntime.missedFrames = 0;
       visionRuntime.warningFrames = 0;
       visionRuntime.lastPoseSentAt = 0;
-      visionRuntime.lastHandsSentAt = 0;
+      visionRuntime.poseResultAt = 0;
+      visionRuntime.poseErrors = 0;
       setVisionAlarm(false);
       if (showToast) setVisionStatus('摄像头已关闭');
       setVisionPhase('待启动', 0);
@@ -1947,9 +1622,6 @@
       updateVisionText('vision-live-duration', '0.0s');
       clearVisionCanvas();
       setVisionButtonState();
-    }
-    function onHandResults(results) {
-      visionRuntime.lastHandResults = results;
     }
     function landmarkSet(results) {
       const p = patient(accessiblePatientId());
@@ -1980,7 +1652,6 @@
       if (modeName === '平衡模式') return [pts.shoulder, pts.otherShoulder, pts.hip, pts.otherHip];
       if (modeName === '转移模式') return [pts.shoulder, pts.otherShoulder, pts.hip, pts.knee, pts.ankle];
       if (modeName === '步态模式') return [pts.hip, pts.knee, pts.ankle, pts.heel, pts.toe, pts.otherHip];
-      if (modeName === '上肢精细模式') return [pts.shoulder, pts.otherShoulder, pts.elbow, pts.wrist, pts.hip, pts.otherHip];
       return [pts.shoulder, pts.elbow, pts.wrist];
     }
     function visionTaskMetrics(modeName, pts, calibration = {}, startPoint = null) {
@@ -2119,7 +1790,6 @@
       setVisionPhase('骨长校准完成', 42);
       setVisionButtonState();
       openToast(`${mode.mode}校准完成，已记录${mode.points.join('、')}对应基准。`);
-      speakVisionFeedback('位置已经调整好了。准备好以后，请点击开始训练，我们慢慢完成。', { force:true });
     }
     function startRealVisionTraining() {
       const p = patient(accessiblePatientId());
@@ -2136,7 +1806,6 @@
       const action = currentVisionAction(p);
       const mode = visualModeForAction(action);
       const pts = landmarkSet(visionRuntime.lastResults);
-      const hand = selectAffectedHand(pts);
       const required = requiredVisionPoints(mode.mode, pts);
       if (required.some(x => !x)) {
         openToast(`${action.name} 当前采用${mode.mode}，需要识别：${mode.points.join('、')}。请调整画面后再开始。`);
@@ -2148,11 +1817,6 @@
         openToast(`${mode.mode}关键点置信度偏低。${visionModeGuidance(mode.mode)}`);
         return;
       }
-      if (mode.needsHand && !hand) {
-        openToast('当前动作需要识别患侧手部21个关键点，请让手掌完整入镜并避免遮挡。');
-        setVisionPhase('等待患侧手部完整入镜', 42);
-        return;
-      }
       visionRuntime.metrics = {
         action,
         mode,
@@ -2162,40 +1826,29 @@
         jerkValues:[],
         startPoint:null,
         lastPoint:null,
+        smoothedPoint:null,
         lastVelocity:null,
         lastAcceleration:null,
         targetLabel:'',
         abnormalWarning:'',
-        ruleEvents:[],
-        baseShoulderWidth:dist2(pts.shoulder, pts.otherShoulder),
-        startShoulderY:pts.shoulder?.y || 0,
-        startWrist:pts.wrist ? { x:pts.wrist.x, y:pts.wrist.y } : null,
-        startPalmAngle:palmRotationAngle(hand),
-        palmRotationMax:0,
-        handOpenMin:Infinity,
-        handOpenMax:-Infinity,
-        gripPhase:'open',
-        gripReps:0,
-        actionLive:null,
-        coachStep:-1,
-        coachStarted:false,
-        coachChangedAt:0,
         latest:null
       };
       visionRuntime.missedFrames = 0;
       visionRuntime.warningFrames = 0;
       visionRuntime.alarmFrames = 0;
+      visionRuntime.alarmSafeFrames = 0;
       visionRuntime.lastFrameTime = 0;
       setVisionAlarm(false);
       visionRuntime.training = true;
       setVisionStatus('真实训练采集中', 'bg-violet-50 text-violet-700 border border-violet-100');
-      setVisionPhase('温和陪练已开始', 50);
+      setVisionPhase('真实训练采集中', 50);
       setVisionButtonState();
-      setCoachStep(visionRuntime.metrics, 0);
     }
     function onPoseResults(results) {
       visionRuntime.lastResults = results;
       visionRuntime.poseFrames = (visionRuntime.poseFrames || 0) + 1;
+      visionRuntime.poseResultAt = performance.now();
+      visionRuntime.poseErrors = 0;
       const canvas = document.getElementById('vision-canvas');
       const video = document.getElementById('vision-video');
       if (!canvas) return;
@@ -2237,9 +1890,14 @@
         core = [poseIndex(side,'hip'),poseIndex(side,'knee'),poseIndex(side,'ankle'),poseIndex(side,'heel'),poseIndex(side,'toe'),poseIndex(side === 'left' ? 'right' : 'left','hip')];
         lines = [[23,24],[poseIndex(side,'hip'),poseIndex(side,'knee')],[poseIndex(side,'knee'),poseIndex(side,'ankle')],[poseIndex(side,'ankle'),poseIndex(side,'heel')],[poseIndex(side,'heel'),poseIndex(side,'toe')],[poseIndex(side,'ankle'),poseIndex(side,'toe')]];
       }
+      const labels = {
+        11:'左肩', 12:'右肩', 13:'左肘', 14:'右肘', 15:'左腕', 16:'右腕',
+        23:'左髋', 24:'右髋', 25:'左膝', 26:'右膝', 27:'左踝', 28:'右踝',
+        29:'左跟', 30:'右跟', 31:'左足', 32:'右足'
+      };
       ctx.lineWidth = 5;
       lines.forEach(([a,b]) => {
-        if (!landmarks[a] || !landmarks[b]) return;
+        if (!landmarks[a] || !landmarks[b] || (landmarks[a].visibility ?? 1) < .25 || (landmarks[b].visibility ?? 1) < .25) return;
         ctx.strokeStyle = core.includes(a) && core.includes(b) ? '#14b8a6' : 'rgba(255,255,255,.55)';
         ctx.beginPath();
         ctx.moveTo(landmarks[a].x * canvas.width, landmarks[a].y * canvas.height);
@@ -2252,27 +1910,17 @@
         ctx.beginPath();
         ctx.arc(pt.x * canvas.width, pt.y * canvas.height, core.includes(i) ? 7 : 4, 0, Math.PI * 2);
         ctx.fill();
-      });
-      if (mode === '上肢精细模式') {
-        const hand = selectAffectedHand(landmarkSet({ poseLandmarks:landmarks }));
-        const handLines = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
-        if (hand) {
-          ctx.strokeStyle = '#38bdf8';
-          ctx.lineWidth = 3;
-          handLines.forEach(([a,b]) => {
-            ctx.beginPath();
-            ctx.moveTo(hand[a].x * canvas.width, hand[a].y * canvas.height);
-            ctx.lineTo(hand[b].x * canvas.width, hand[b].y * canvas.height);
-            ctx.stroke();
-          });
-          hand.forEach((point, index) => {
-            ctx.fillStyle = [4,8,12,16,20].includes(index) ? '#f59e0b' : '#e0f2fe';
-            ctx.beginPath();
-            ctx.arc(point.x * canvas.width, point.y * canvas.height, [4,8,12,16,20].includes(index) ? 5 : 3, 0, Math.PI * 2);
-            ctx.fill();
-          });
+        if (core.includes(i) && labels[i]) {
+          const x = pt.x * canvas.width;
+          const y = pt.y * canvas.height;
+          ctx.font = 'bold 15px sans-serif';
+          const width = ctx.measureText(labels[i]).width + 12;
+          ctx.fillStyle = 'rgba(15,23,42,.82)';
+          ctx.fillRect(x + 9, y - 23, width, 22);
+          ctx.fillStyle = '#fff';
+          ctx.fillText(labels[i], x + 15, y - 7);
         }
-      }
+      });
       if (visionRuntime.alarmActive) {
         ctx.strokeStyle = '#dc2626';
         ctx.lineWidth = 12;
@@ -2284,7 +1932,6 @@
       const metrics = visionRuntime.metrics;
       const pts = landmarkSet(results);
       if (!metrics) return;
-      const hand = selectAffectedHand(pts);
       const required = requiredVisionPoints(metrics.mode.mode, pts);
       if (!(results.poseLandmarks || []).length || required.some(x => !x)) {
         visionRuntime.missedFrames += 1;
@@ -2293,17 +1940,6 @@
         if (visionRuntime.missedFrames === 1 || visionRuntime.missedFrames % 12 === 0) {
           setVisionPhase(`识别不完整 · ${visionModeGuidance(metrics.mode.mode)}`, 45);
           updateVisionText('vision-live-confidence', '-');
-        }
-        return;
-      }
-      if (metrics.mode.needsHand && !hand) {
-        visionRuntime.missedFrames += 1;
-        setVisionAlarm(false);
-        setVisionPhase('手部识别不完整，请让患侧手掌完整入镜', 46);
-        const box = document.getElementById('vision-rule-feedback');
-        if (box) {
-          box.className = 'rounded-2xl bg-amber-50 border border-amber-100 p-4 text-sm font-black text-amber-700';
-          box.textContent = '手部关键点不完整，暂不进行动作规则判定';
         }
         return;
       }
@@ -2323,7 +1959,14 @@
         return;
       }
       visionRuntime.missedFrames = 0;
-      const primary = { x:task.primary.x, y:task.primary.y };
+      const rawPrimary = { x:task.primary.x, y:task.primary.y };
+      metrics.smoothedPoint = metrics.smoothedPoint
+        ? {
+            x:metrics.smoothedPoint.x * .72 + rawPrimary.x * .28,
+            y:metrics.smoothedPoint.y * .72 + rawPrimary.y * .28
+          }
+        : rawPrimary;
+      const primary = metrics.smoothedPoint;
       if (!metrics.startPoint) metrics.startPoint = primary;
       metrics.targetLabel = task.targetLabel;
       let jerkDisplay = 0;
@@ -2336,6 +1979,7 @@
             const jerk = { x:(acceleration.x - metrics.lastAcceleration.x) / dt, y:(acceleration.y - metrics.lastAcceleration.y) / dt };
             jerkDisplay = Math.min(9.9, Math.hypot(jerk.x, jerk.y) / 45);
             metrics.jerkValues.push(jerkDisplay);
+            if (metrics.jerkValues.length > 45) metrics.jerkValues.shift();
           }
           metrics.lastAcceleration = acceleration;
         }
@@ -2344,11 +1988,10 @@
       metrics.lastPoint = primary;
       visionRuntime.lastFrameTime = now;
       metrics.frames += 1;
-      const jerkPeak = Number(Math.max(0, ...metrics.jerkValues).toFixed(2));
+      const jerkPeak = Number(percentile(metrics.jerkValues.slice(-30), .9).toFixed(2));
       const jerkVariance = Number(variance(metrics.jerkValues).toFixed(2));
       const smoothnessScore = clamp(100 - jerkPeak * 8 - jerkVariance * 14 - (task.visibility < 55 ? 6 : 0), 0, 100);
       const confidence = clamp(task.visibility * .82 + (task.ratio > .35 && task.ratio < 1.1 ? 18 : 5), 0, 100);
-      const elapsed = Math.max(1, (now - metrics.startedAt) / 1000);
       if (confidence < 58) {
         visionRuntime.warningFrames += 1;
         if (visionRuntime.warningFrames === 1 || visionRuntime.warningFrames % 12 === 0) {
@@ -2357,24 +2000,29 @@
       } else {
         visionRuntime.warningFrames = Math.max(0, visionRuntime.warningFrames - 2);
       }
-      const actionEvents = evaluateActionRules(metrics, pts, hand, elapsed);
-      updateGuidedCoach(metrics, elapsed);
-      showRuleFeedback(actionEvents, metrics.action);
       const abnormalMessage = assessVisionAbnormal(metrics, pts, task, jerkPeak, smoothnessScore, confidence);
-      if (abnormalMessage) visionRuntime.alarmFrames += 1;
-      else visionRuntime.alarmFrames = Math.max(0, visionRuntime.alarmFrames - 2);
-      if (visionRuntime.alarmFrames >= 14) {
+      const alarmReady = metrics.frames > 18 && (now - metrics.startedAt) > 1800;
+      if (abnormalMessage && alarmReady) {
+        visionRuntime.alarmFrames += 1;
+        visionRuntime.alarmSafeFrames = 0;
+      } else {
+        visionRuntime.alarmSafeFrames += 1;
+        visionRuntime.alarmFrames = Math.max(0, visionRuntime.alarmFrames - 2);
+      }
+      if (!visionRuntime.alarmActive && visionRuntime.alarmFrames >= 12) {
         metrics.abnormalWarning = abnormalMessage || metrics.abnormalWarning;
         setVisionAlarm(true, metrics.abnormalWarning);
-      } else if (visionRuntime.alarmFrames === 0) {
+      } else if (visionRuntime.alarmActive && visionRuntime.alarmSafeFrames >= 8) {
+        visionRuntime.alarmFrames = 0;
+        visionRuntime.alarmSafeFrames = 0;
         setVisionAlarm(false);
       }
+      const elapsed = Math.max(1, (now - metrics.startedAt) / 1000);
       const avgFps = clamp(metrics.frames / elapsed, 1, 60);
       const latency = clamp(220 - avgFps * 3 + metrics.mode.count * 1.8, 70, 240);
       metrics.latest = {
         date:todayText(),
         source:'camera',
-        actionId:metrics.action.id,
         action:metrics.action.name,
         duration:Number(elapsed.toFixed(1)),
         frameCount:metrics.frames,
@@ -2388,8 +2036,6 @@
         compensationConfidence:confidence,
         targetLabel:task.targetLabel,
         abnormalWarning:metrics.abnormalWarning,
-        ruleEvents:metrics.ruleEvents.map(event => ({...event})),
-        actionMetrics:metrics.actionLive || [],
         recognitionMode:metrics.mode.mode,
         trackedPoints:metrics.mode.points,
         retainedKeypoints:metrics.mode.count,
@@ -2397,16 +2043,16 @@
         avgFps,
         latency,
         deviceLoad:avgFps >= 28 ? '低负载' : avgFps >= 20 ? '中负载' : '高负载',
-        suggestion:actionEvents.length ? `${actionEvents.map(event => event.message).join('、')}。${metrics.action.voiceFeedback || ''}` : smoothnessScore < 50 ? `${metrics.mode.mode}真实训练中${task.targetLabel}卡顿或突然变化较明显，建议治疗师复核动作质量并降低训练难度。` : confidence < 70 ? `${metrics.mode.mode}关键点置信度偏低，建议调整摄像头角度后重新训练。` : `${metrics.mode.mode}真实训练动作质量已记录，${task.targetLabel}可纳入本阶段康复进展判断。`
+        suggestion:smoothnessScore < 50 ? `${metrics.mode.mode}真实训练中${task.targetLabel}卡顿或突然变化较明显，建议治疗师复核动作质量并降低训练难度。` : confidence < 70 ? `${metrics.mode.mode}关键点置信度偏低，建议调整摄像头角度后重新训练。` : `${metrics.mode.mode}真实训练动作质量已记录，${task.targetLabel}可纳入本阶段康复进展判断。`
       };
-      updateActionLiveMetrics(metrics, [smoothnessScore, jerkPeak, task.compensatedAmplitude + '%', confidence + '%']);
+      updateVisionText('vision-live-score', smoothnessScore);
+      updateVisionText('vision-live-jerk', jerkPeak);
+      updateVisionText('vision-live-amplitude', task.compensatedAmplitude + '%');
+      updateVisionText('vision-live-confidence', confidence + '%');
       updateVisionText('vision-live-frames', metrics.frames);
       updateVisionText('vision-live-fps', avgFps);
       updateVisionText('vision-live-duration', `${elapsed.toFixed(1)}s`);
-      if (confidence >= 58) {
-        const coach = guidedCoachForAction(metrics.action)[metrics.coachStep];
-        setVisionPhase(`陪练中 · ${coach?.title || metrics.mode.mode}`, Math.min(95, 50 + elapsed * 4));
-      }
+      if (confidence >= 58) setVisionPhase(`训练采集中 · ${metrics.mode.mode}`, Math.min(95, 50 + elapsed * 4));
     }
     function finishRealVisionTraining() {
       const p = patient(accessiblePatientId());
@@ -2425,28 +2071,16 @@
       setVisionStatus('真实训练已保存', 'bg-green-50 text-success border border-green-100');
       setVisionPhase('真实训练已保存', 100);
       setVisionButtonState();
-      updateVisionText('vision-coach-step', '训练完成');
-      updateVisionText('vision-coach-message', '今天完成得很好，请慢慢放松手臂，休息一下。');
-      updateVisionText('vision-mobile-coach-step', '训练完成');
-      updateVisionText('vision-mobile-coach-message', '今天完成得很好，请慢慢放松手臂，休息一下。');
-      renderCoachProgress({ action:visionRuntime.metrics.action }, 4);
-      speakVisionFeedback('今天完成得很好。请慢慢放松手臂，休息一下。', { force:true, interrupt:false });
-      const action = currentVisionAction(p);
-      const ui = visionActionUi(action);
-      const metricValues = latest.actionMetrics?.length
-        ? latest.actionMetrics
-        : [latest.smoothnessScore, latest.jerkPeak, latest.compensatedAmplitude + '%', latest.compensationConfidence + '%'];
       openModal(`<div class="text-center py-4">
         <div class="w-16 h-16 mx-auto rounded-full bg-green-50 text-success grid place-items-center text-2xl mb-4"><i class="fa-solid fa-check"></i></div>
         <h3 class="text-2xl font-black">真实视觉训练已保存</h3>
         <p class="text-slate-500 mt-2">本次数据已同步到患者画像、评估指标、每日打卡、风险预警和阶段报告。</p>
         <div class="grid md:grid-cols-4 gap-3 mt-5 text-left">
-          ${visionStat(ui.labels[0], metricValues[0], 'fa-crosshairs', 'text-primary')}
-          ${visionStat(ui.labels[1], metricValues[1], 'fa-person', 'text-accent')}
-          ${visionStat(ui.labels[2], metricValues[2], 'fa-ruler-combined', 'text-success')}
-          ${visionStat(ui.labels[3], metricValues[3], 'fa-hand', 'text-violet-700')}
+          ${visionStat('平滑度', latest.smoothnessScore, 'fa-wave-square', latest.smoothnessScore >= 70 ? 'text-success' : 'text-danger')}
+          ${visionStat('Jerk峰值', latest.jerkPeak, 'fa-bolt', latest.jerkPeak > 3 ? 'text-danger' : 'text-accent')}
+          ${visionStat('补偿幅度', latest.compensatedAmplitude + '%', 'fa-ruler-combined', 'text-primary')}
+          ${visionStat('置信度', latest.compensationConfidence + '%', 'fa-cube', latest.compensationConfidence >= 70 ? 'text-success' : 'text-warning')}
         </div>
-        ${(latest.ruleEvents || []).length ? `<div class="mt-5 rounded-2xl bg-amber-50 border border-amber-100 p-4 text-left text-sm"><p class="font-black text-amber-700">本次触发规则</p><p class="mt-2 text-slate-700">${latest.ruleEvents.map(event => `${event.message}（峰值${event.maxValue}${event.unit}，触发${event.count}帧）`).join('；')}</p></div>` : `<div class="mt-5 rounded-2xl bg-green-50 border border-green-100 p-4 text-sm font-black text-success">本次未触发动作代偿规则</div>`}
         <button onclick="closeModal(); drawVisionLab();" class="mt-6 px-8 py-3 rounded-2xl bg-primary text-white font-black">查看更新后的视觉记录</button>
       </div>`);
     }
