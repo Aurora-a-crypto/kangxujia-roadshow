@@ -263,13 +263,56 @@
       }
     ];
 
+    const VISION_ACTION_LIBRARY = [
+      {
+        id:'clinical-touch-shoulder',
+        key:'touchShoulder',
+        name:'坐位患侧手摸对侧肩膀',
+        category:'上肢控制',
+        requirement:'端坐，患侧手缓慢摸对侧肩，肘自然向内，躯干保持正直。',
+        checks:[
+          '双肩高度差 > 4cm：警告耸肩代偿',
+          '躯干中线偏移 > 3cm：警告躯干侧倾代偿',
+          '肘外展角度 > 30°：警告肘外翻代偿'
+        ],
+        voice:'请勿耸肩，身体别歪，手肘向内靠近身体。'
+      },
+      {
+        id:'clinical-forearm-rotation',
+        key:'forearmRotation',
+        name:'坐位前臂旋前/旋后（翻书/拧瓶盖）',
+        category:'前臂旋转',
+        requirement:'端坐，患侧手放桌面，前臂尽量不动，手掌缓慢向上、向下翻转。',
+        checks:[
+          '手掌朝向变化不足：提示翻转手腕',
+          '肩部上提 > 3cm：警告抬肩代偿',
+          '手腕晃动幅度过大：提示保持手腕稳定'
+        ],
+        voice:'肩膀放松，前臂不动，慢慢翻转手掌。'
+      },
+      {
+        id:'clinical-grip-release',
+        key:'gripRelease',
+        name:'坐位患侧手抓握-放松',
+        category:'手功能',
+        requirement:'端坐，患侧手平放桌面，握拳抓握后张开放松，缓慢重复。',
+        checks:[
+          '肩部抬高 > 3cm：警告耸肩代偿',
+          '腕关节过度屈曲：警告手腕代偿用力',
+          '抓握或张开幅度不足：提示尽量握紧并完全张开'
+        ],
+        voice:'肩膀放松，手腕放平，用力抓握再慢慢张开。'
+      }
+    ];
+
     const state = { currentUser:null, selectedPatientId:'P001', charts:[], patients:loadPatients(), currentViewId:'', syncTimer:null, lastSyncAt:'-' };
     const visionRuntime = {
       camera:null, stream:null, pose:null, running:false, training:false,
       lastResults:null, lastFrameTime:0, metrics:null, raf:null,
       audio:null, alarmActive:false, alarmFrames:0, alarmSafeFrames:0, lastAlarmAt:0,
       poseBase:'https://cdn.jsdelivr.net/npm/@mediapipe/pose', poseFrames:0, poseBusy:false,
-      missedFrames:0, warningFrames:0, lastPoseSentAt:0, poseResultAt:0, poseErrors:0
+      missedFrames:0, warningFrames:0, lastPoseSentAt:0, poseResultAt:0, poseErrors:0,
+      lastVoiceAt:0, lastVoiceMessage:''
     };
 
     function loadPatients() {
@@ -548,6 +591,20 @@
       }
       return false;
     }
+    function prewarmVisionAssets() {
+      const files = [
+        'pose_web.binarypb',
+        'pose_landmark_full.tflite',
+        'pose_solution_packed_assets_loader.js',
+        'pose_solution_packed_assets.data',
+        'pose_solution_simd_wasm_bin.js',
+        'pose_solution_simd_wasm_bin.wasm'
+      ];
+      ensurePoseLibrariesRobust().catch(() => false);
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        files.forEach(file => fetch(`/vendor/mediapipe/pose/${file}`, { cache:'force-cache' }).catch(() => null));
+      }
+    }
     function playVisionAlarm() {
       initVisionAudio();
       const ctx = visionRuntime.audio;
@@ -565,6 +622,19 @@
         osc.start(now + offset);
         osc.stop(now + offset + .18);
       });
+    }
+    function speakVisionFeedback(message) {
+      if (!message || !('speechSynthesis' in window)) return;
+      const now = Date.now();
+      if (message === visionRuntime.lastVoiceMessage && now - visionRuntime.lastVoiceAt < 4500) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(message);
+      utterance.lang = 'zh-CN';
+      utterance.rate = .92;
+      utterance.volume = .9;
+      window.speechSynthesis.speak(utterance);
+      visionRuntime.lastVoiceAt = now;
+      visionRuntime.lastVoiceMessage = message;
     }
     function setVisionAlarm(active, message = '') {
       const stage = document.getElementById('vision-stage');
@@ -607,13 +677,66 @@
       }
       return messages[0] || '';
     }
+    function assessClinicalAction(metrics, task, elapsed) {
+      const clinical = task.clinical || {};
+      if (metrics.mode.key === 'touchShoulder') {
+        if (clinical.shoulderHeightCm > 4) return { warning:'检测到耸肩代偿，请放松肩膀。', prompt:'' };
+        if (clinical.trunkShiftCm > 3) return { warning:'检测到躯干侧倾代偿，请保持身体正直。', prompt:'' };
+        if (clinical.elbowOutAngle > 30) return { warning:'检测到肘外翻代偿，请让手肘向内靠近身体。', prompt:'' };
+      }
+      if (metrics.mode.key === 'forearmRotation') {
+        metrics.palmAngles.push(clinical.palmVectorAngle || 0);
+        if (metrics.palmAngles.length > 60) metrics.palmAngles.shift();
+        const rotationRange = metrics.palmAngles.length ? Math.max(...metrics.palmAngles) - Math.min(...metrics.palmAngles) : 0;
+        if (clinical.shoulderRiseCm > 3) return { warning:'检测到抬肩代偿，请放松肩膀。', prompt:'' };
+        if (elapsed > 2.5 && rotationRange < 22) return { warning:'', prompt:'手掌朝向变化不足，请慢慢翻转手掌。' };
+        if (clinical.wristTravel > .28) return { warning:'', prompt:'手腕晃动幅度较大，请保持手腕稳定，用前臂旋转。' };
+      }
+      if (metrics.mode.key === 'gripRelease') {
+        metrics.handSpreads.push(clinical.handSpread || 0);
+        if (metrics.handSpreads.length > 60) metrics.handSpreads.shift();
+        const spreadRange = metrics.handSpreads.length ? Math.max(...metrics.handSpreads) - Math.min(...metrics.handSpreads) : 0;
+        if (clinical.shoulderRiseCm > 3) return { warning:'检测到耸肩代偿，请放松肩膀。', prompt:'' };
+        if (clinical.wristAngle > 0 && clinical.wristAngle < 125) return { warning:'检测到手腕过度屈曲，请将手腕放平。', prompt:'' };
+        if (elapsed > 2.5 && spreadRange < .09) return { warning:'', prompt:'手部开合幅度不足，请尽量握紧并完全张开。' };
+      }
+      return { warning:'', prompt:'' };
+    }
     function visionModeGuidance(modeName) {
+      if (modeName === '对侧肩触碰') return '请端坐并让双肩、双髋、患侧肘腕完整入镜。';
+      if (modeName === '前臂旋转') return '请让患侧肩、肘、手腕和手指完整入镜，手掌不要被桌沿遮挡。';
+      if (modeName === '抓握放松') return '请把患侧手靠近镜头并完整露出拇指、食指和小指。';
       if (modeName === '步态模式') return '请把手机或电脑放远一点，让头部、髋部、膝盖和脚踝尽量同时入镜。';
       if (modeName === '转移模式') return '请后退半步，让肩、髋、膝、踝都进入画面，侧前方拍摄更稳定。';
       if (modeName === '平衡模式') return '请保持上半身和髋部完整入镜，镜头尽量与胸口同高。';
       return '请让肩、肘、手腕完整入镜，避免手臂离开画面边缘。';
     }
+    function visionActionDefinition(action = {}) {
+      return VISION_ACTION_LIBRARY.find(item => item.id === action.id || item.key === action.key)
+        || VISION_ACTION_LIBRARY.find(item => String(action.name || '').includes(item.name.slice(2, 8)))
+        || null;
+    }
+    function visionActionGuideHtml(action) {
+      const definition = visionActionDefinition(action) || VISION_ACTION_LIBRARY[0];
+      return `
+        <div class="rounded-3xl bg-blue-50 border border-blue-100 p-5 text-sm leading-7">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-xs font-black text-primary">当前动作指导</p>
+              <h4 class="text-lg font-black mt-1">${definition.name}</h4>
+            </div>
+            <span class="badge bg-white text-primary border border-blue-100">${definition.category}</span>
+          </div>
+          <p class="mt-3"><span class="font-black">动作要求：</span>${definition.requirement}</p>
+          <div class="mt-3 grid gap-2">${definition.checks.map((check, index) => `<p class="rounded-xl bg-white px-3 py-2 border border-blue-100"><span class="font-black text-primary">${index + 1}.</span> ${check}</p>`).join('')}</div>
+          <p class="mt-3 text-accent font-black"><i class="fa-solid fa-volume-high mr-2"></i>语音反馈：${definition.voice}</p>
+        </div>`;
+    }
     function visualModeForAction(action = {}) {
+      const definition = visionActionDefinition(action);
+      if (definition?.key === 'touchShoulder') return { key:definition.key, mode:'对侧肩触碰', points:['双肩','双髋','患侧肘','患侧腕'], count:8, ratio:76, focus:'肩高差、躯干中线、肘外展角度' };
+      if (definition?.key === 'forearmRotation') return { key:definition.key, mode:'前臂旋转', points:['双肩','患侧肘','患侧腕','拇指/食指/小指'], count:9, ratio:73, focus:'手掌朝向、肩部上提、腕部稳定' };
+      if (definition?.key === 'gripRelease') return { key:definition.key, mode:'抓握放松', points:['双肩','患侧肘','患侧腕','拇指/食指/小指'], count:9, ratio:73, focus:'肩部代偿、腕关节角度、手部开合幅度' };
       const text = `${action.category || ''}${action.name || ''}`;
       if (/步态|步行|行走/.test(text)) return { mode:'步态模式', points:['双髋','双膝','双踝','足跟/足尖','躯干'], count:15, ratio:55, focus:'步幅、膝关节控制、步行稳定性' };
       if (/ADL|转移|坐站|站立|下肢/.test(text)) return { mode:'转移模式', points:['躯干','髋','膝','踝','手部支撑点'], count:14, ratio:58, focus:'起立稳定性、下肢负重、跌倒风险姿势' };
@@ -627,8 +750,8 @@
       return 'right';
     }
     function poseIndex(side, part) {
-      const left = { shoulder:11, elbow:13, wrist:15, hip:23, knee:25, ankle:27, heel:29, toe:31 };
-      const right = { shoulder:12, elbow:14, wrist:16, hip:24, knee:26, ankle:28, heel:30, toe:32 };
+      const left = { shoulder:11, elbow:13, wrist:15, pinky:17, index:19, thumb:21, hip:23, knee:25, ankle:27, heel:29, toe:31 };
+      const right = { shoulder:12, elbow:14, wrist:16, pinky:18, index:20, thumb:22, hip:24, knee:26, ankle:28, heel:30, toe:32 };
       return (side === 'left' ? left : right)[part];
     }
     function dist2(a, b) { return Math.hypot((a?.x || 0) - (b?.x || 0), (a?.y || 0) - (b?.y || 0)); }
@@ -1256,9 +1379,8 @@
       const v = latestVision(p);
       const sessions = (visionProfile(p).sessions || []).slice().reverse();
       const mode = visualModeForAction({ name:v.action, category:v.recognitionMode });
-      const planActions = activePlan(p)?.actions || [];
       const patientOptions = accessiblePatients().map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.name} · ${x.id} · ${x.risk}</option>`).join('');
-      const actionOptions = (planActions.length ? planActions : [{ id:'default', name:'坐姿患侧上肢前伸训练', category:'上肢' }]).map((a,i) => `<option value="${a.id || 'default'}" ${i === 0 ? 'selected' : ''}>${a.name} · ${a.category}</option>`).join('');
+      const actionOptions = VISION_ACTION_LIBRARY.map((a,i) => `<option value="${a.id}" ${i === 0 ? 'selected' : ''}>${a.name}</option>`).join('');
       setTitle('AI视觉原创点融合', '原创点二、三、四已接入训练处方、患者画像、风险预警和阶段报告');
       document.getElementById('content').innerHTML = `
         <div class="card p-6 mb-6 border-l-8 border-l-primary">
@@ -1282,16 +1404,17 @@
               </div>
             </div>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-3">
-              <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p class="font-black text-slate-500">实时平滑度</p><p id="vision-live-score" class="text-xl font-black text-primary">-</p></div>
-              <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p class="font-black text-slate-500">Jerk峰值</p><p id="vision-live-jerk" class="text-xl font-black text-accent">-</p></div>
-              <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p class="font-black text-slate-500">补偿幅度</p><p id="vision-live-amplitude" class="text-xl font-black text-success">-</p></div>
+              <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p id="vision-score-label" class="font-black text-slate-500">双肩高度差</p><p id="vision-live-score" class="text-xl font-black text-primary">-</p></div>
+              <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p id="vision-jerk-label" class="font-black text-slate-500">躯干中线偏移</p><p id="vision-live-jerk" class="text-xl font-black text-accent">-</p></div>
+              <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p id="vision-amplitude-label" class="font-black text-slate-500">肘外展角度</p><p id="vision-live-amplitude" class="text-xl font-black text-success">-</p></div>
               <div class="rounded-2xl bg-slate-50 border border-slate-100 p-3"><p class="font-black text-slate-500">置信度</p><p id="vision-live-confidence" class="text-xl font-black text-violet-700">-</p></div>
             </div>
             <div class="space-y-4">
               <div class="grid md:grid-cols-2 gap-3">
                 ${canSeeAll() ? `<label class="font-black text-sm">训练患者<select id="vision-patient-select" class="input mt-2" onchange="changeVisionPatient(this.value)">${patientOptions}</select></label>` : `<div class="rounded-2xl bg-slate-50 border border-slate-100 p-4"><p class="text-xs font-black text-slate-400">训练患者</p><p class="font-black mt-1">${p.name} · ${p.id}</p></div>`}
-                <label class="font-black text-sm">本次训练动作<select id="vision-action-select" class="input mt-2">${actionOptions}</select></label>
+                <label class="font-black text-sm">本次训练动作<select id="vision-action-select" class="input mt-2" onchange="changeVisionAction(this.value)">${actionOptions}</select></label>
               </div>
+              <div id="vision-action-guide">${visionActionGuideHtml(VISION_ACTION_LIBRARY[0])}</div>
               <div class="grid grid-cols-2 gap-3">
                 <button id="vision-open-btn" onclick="startVisionCamera()" class="py-3 rounded-2xl bg-primary text-white font-black"><i class="fa-solid fa-video mr-2"></i>打开摄像头</button>
                 <button id="vision-calibrate-btn" onclick="calibrateVisionPose()" class="py-3 rounded-2xl bg-teal-50 text-accent font-black"><i class="fa-solid fa-ruler-combined mr-2"></i>校准骨长</button>
@@ -1305,17 +1428,17 @@
               </div>
               <div class="rounded-3xl bg-slate-50 border border-slate-100 p-5 text-sm leading-7">
                 <p class="font-black text-primary mb-2">真实训练步骤</p>
-                <p>1. 浏览器允许摄像头权限。</p>
-                <p>2. 患者坐稳，患侧上肢完整出现在画面中。</p>
-                <p>3. 点击“校准骨长”，记录肩-肘、肘-腕基准。</p>
-                <p>4. 点击“开始训练”，完成当前处方动作。</p>
-                <p>5. 点击“结束保存”，真实数据会进入画像、打卡、评估、预警和报告。</p>
+                <p>1. 打开摄像头，等待画面出现彩色骨架点位。</p>
+                <p>2. 按上方“当前动作指导”调整坐姿与镜头。</p>
+                <p>3. 点击“校准骨长”，保持标准起始姿势约1秒。</p>
+                <p>4. 点击“开始训练”，系统按当前动作的独立规则识别。</p>
+                <p>5. 点击“结束保存”，数据进入患者画像、预警和报告。</p>
               </div>
               <div class="grid grid-cols-2 gap-3">
                 ${visionStat('采集帧数', '<span id="vision-live-frames">0</span>', 'fa-images', 'text-primary')}
                 ${visionStat('实时帧率', '<span id="vision-live-fps">-</span>', 'fa-gauge-high', 'text-success')}
-                ${visionStat('当前模式', v.recognitionMode, 'fa-person-rays', 'text-violet-700')}
-                ${visionStat('保留关键点', v.retainedKeypoints + '/33', 'fa-diagram-project', 'text-violet-700')}
+                ${visionStat('当前模式', '<span id="vision-live-mode">对侧肩触碰</span>', 'fa-person-rays', 'text-violet-700')}
+                ${visionStat('保留关键点', '<span id="vision-live-keypoints">8/33</span>', 'fa-diagram-project', 'text-violet-700')}
               </div>
             </div>
           </div>
@@ -1387,6 +1510,7 @@
         </div>`;
       setVisionButtonState();
       setVisionPhase('待启动', 0);
+      setTimeout(prewarmVisionAssets, 100);
     }
     function simulateVisionSession() {
       const p = patient(accessiblePatientId());
@@ -1458,10 +1582,63 @@
       if (el) el.textContent = text;
     }
     function currentVisionAction(p) {
-      const plan = activePlan(p);
-      const actions = plan?.actions || [];
       const selected = document.getElementById('vision-action-select')?.value;
-      return actions.find(a => a.id === selected) || actions[0] || { id:'default', name:'坐姿患侧上肢前伸训练', category:'上肢' };
+      return VISION_ACTION_LIBRARY.find(action => action.id === selected) || VISION_ACTION_LIBRARY[0];
+    }
+    function changeVisionAction(actionId) {
+      const action = VISION_ACTION_LIBRARY.find(item => item.id === actionId) || VISION_ACTION_LIBRARY[0];
+      const mode = visualModeForAction(action);
+      const guide = document.getElementById('vision-action-guide');
+      if (guide) guide.innerHTML = visionActionGuideHtml(action);
+      updateVisionText('vision-live-mode', mode.mode);
+      updateVisionText('vision-live-keypoints', `${mode.count}/33`);
+      const labels = mode.key === 'forearmRotation'
+        ? ['手掌旋转幅度','肩部上提','手腕晃动幅度']
+        : mode.key === 'gripRelease'
+          ? ['手部开合幅度','肩部上提','腕关节角度']
+          : ['双肩高度差','躯干中线偏移','肘外展角度'];
+      updateVisionText('vision-score-label', labels[0]);
+      updateVisionText('vision-jerk-label', labels[1]);
+      updateVisionText('vision-amplitude-label', labels[2]);
+      updateVisionText('vision-live-score', '-');
+      updateVisionText('vision-live-jerk', '-');
+      updateVisionText('vision-live-amplitude', '-');
+      visionRuntime.training = false;
+      visionRuntime.metrics = null;
+      visionRuntime.alarmFrames = 0;
+      visionRuntime.alarmSafeFrames = 0;
+      setVisionAlarm(false);
+      if (visionRuntime.running) {
+        setVisionStatus('训练动作已切换，请重新校准', 'bg-blue-50 text-primary border border-blue-100');
+        setVisionPhase(`${mode.mode} · 等待校准`, 32);
+      } else {
+        setVisionPhase(`${mode.mode} · 待启动`, 0);
+      }
+      setVisionButtonState();
+    }
+    function updateClinicalMetricCards(mode, task, smoothnessScore, jerkPeak) {
+      const clinical = task.clinical || {};
+      if (mode.key === 'touchShoulder') {
+        updateVisionText('vision-live-score', `${(clinical.shoulderHeightCm || 0).toFixed(1)}cm`);
+        updateVisionText('vision-live-jerk', `${(clinical.trunkShiftCm || 0).toFixed(1)}cm`);
+        updateVisionText('vision-live-amplitude', `${Math.round(clinical.elbowOutAngle || 0)}°`);
+        return;
+      }
+      if (mode.key === 'forearmRotation') {
+        const angles = visionRuntime.metrics?.palmAngles || [];
+        const range = angles.length ? Math.max(...angles) - Math.min(...angles) : 0;
+        updateVisionText('vision-live-score', `${Math.round(range)}°`);
+        updateVisionText('vision-live-jerk', `${(clinical.shoulderRiseCm || 0).toFixed(1)}cm`);
+        updateVisionText('vision-live-amplitude', `${Math.round((clinical.wristTravel || 0) * 100)}%`);
+        return;
+      }
+      if (mode.key === 'gripRelease') {
+        updateVisionText('vision-live-score', `${Math.round((clinical.handSpread || 0) * 100)}%`);
+        updateVisionText('vision-live-jerk', `${(clinical.shoulderRiseCm || 0).toFixed(1)}cm`);
+        updateVisionText('vision-live-amplitude', `${Math.round(clinical.wristAngle || 0)}°`);
+        return;
+      }
+      updateClinicalMetricCards(metrics.mode, task, smoothnessScore, jerkPeak);
     }
     async function startVisionCamera() {
       const video = document.getElementById('vision-video');
@@ -1519,8 +1696,8 @@
         visionRuntime.poseResultAt = performance.now();
         visionRuntime.poseErrors = 0;
         startVisionPoseLoop(video);
-        setVisionStatus('摄像头已打开，等待校准', 'bg-blue-50 text-primary border border-blue-100');
-        setVisionPhase('等待骨长校准', 25);
+        setVisionStatus('摄像头已打开，关键点模型预热中', 'bg-blue-50 text-primary border border-blue-100');
+        setVisionPhase('模型预热中，请保持身体入镜', 25);
         setVisionButtonState();
       } catch (error) {
         setVisionStatus('摄像头启动失败', 'bg-red-50 text-danger border border-red-100');
@@ -1633,6 +1810,9 @@
         shoulder:lm[poseIndex(side, 'shoulder')],
         elbow:lm[poseIndex(side, 'elbow')],
         wrist:lm[poseIndex(side, 'wrist')],
+        pinky:lm[poseIndex(side, 'pinky')],
+        index:lm[poseIndex(side, 'index')],
+        thumb:lm[poseIndex(side, 'thumb')],
         hip:lm[poseIndex(side, 'hip')],
         knee:lm[poseIndex(side, 'knee')],
         ankle:lm[poseIndex(side, 'ankle')],
@@ -1641,6 +1821,9 @@
         otherShoulder:lm[poseIndex(other, 'shoulder')],
         otherElbow:lm[poseIndex(other, 'elbow')],
         otherWrist:lm[poseIndex(other, 'wrist')],
+        otherPinky:lm[poseIndex(other, 'pinky')],
+        otherIndex:lm[poseIndex(other, 'index')],
+        otherThumb:lm[poseIndex(other, 'thumb')],
         otherHip:lm[poseIndex(other, 'hip')],
         otherKnee:lm[poseIndex(other, 'knee')],
         otherAnkle:lm[poseIndex(other, 'ankle')],
@@ -1649,6 +1832,8 @@
       };
     }
     function requiredVisionPoints(modeName, pts) {
+      if (modeName === '对侧肩触碰') return [pts.shoulder, pts.otherShoulder, pts.elbow, pts.wrist, pts.hip, pts.otherHip];
+      if (modeName === '前臂旋转' || modeName === '抓握放松') return [pts.shoulder, pts.otherShoulder, pts.elbow, pts.wrist, pts.thumb, pts.index, pts.pinky];
       if (modeName === '平衡模式') return [pts.shoulder, pts.otherShoulder, pts.hip, pts.otherHip];
       if (modeName === '转移模式') return [pts.shoulder, pts.otherShoulder, pts.hip, pts.knee, pts.ankle];
       if (modeName === '步态模式') return [pts.hip, pts.knee, pts.ankle, pts.heel, pts.toe, pts.otherHip];
@@ -1659,6 +1844,60 @@
       const hipMid = midpoint(pts.hip, pts.otherHip);
       const kneeMid = midpoint(pts.knee, pts.otherKnee);
       const ankleMid = midpoint(pts.ankle, pts.otherAnkle);
+      if (modeName === '对侧肩触碰') {
+        const shoulderWidth = Math.max(.04, dist2(pts.shoulder, pts.otherShoulder));
+        const shoulderHeightCm = Math.abs(pts.shoulder.y - pts.otherShoulder.y) / shoulderWidth * 36;
+        const trunkShiftCm = shoulderMid && hipMid ? Math.abs(shoulderMid.x - hipMid.x) / shoulderWidth * 36 : 0;
+        const elbowOutAngle = angleAt(pts.elbow, pts.shoulder, pts.hip);
+        const touchDistance = dist2(pts.wrist, pts.otherShoulder);
+        return {
+          primary:pts.wrist,
+          ratio:1,
+          visibility:pointVisibility([pts.shoulder, pts.otherShoulder, pts.elbow, pts.wrist, pts.hip, pts.otherHip]),
+          projectionShortening:0,
+          estimatedReachAngle:elbowOutAngle,
+          compensatedAmplitude:clamp((1 - touchDistance / shoulderWidth) * 100, 0, 100),
+          targetLabel:'患侧手触碰对侧肩',
+          clinical:{ shoulderHeightCm, trunkShiftCm, elbowOutAngle, touchDistance }
+        };
+      }
+      if (modeName === '前臂旋转') {
+        const forearm = Math.max(.04, dist2(pts.elbow, pts.wrist));
+        const handWidth = dist2(pts.index, pts.pinky);
+        const palmVectorAngle = Math.atan2((pts.index?.y || 0) - (pts.pinky?.y || 0), (pts.index?.x || 0) - (pts.pinky?.x || 0)) * 180 / Math.PI;
+        const wristTravel = startPoint ? dist2(startPoint, pts.wrist) / forearm : 0;
+        const shoulderRiseCm = calibration.shoulderY != null
+          ? Math.max(0, (calibration.shoulderY - pts.shoulder.y) / Math.max(.04, calibration.shoulderWidthNorm || forearm) * 36)
+          : 0;
+        return {
+          primary:pts.wrist,
+          ratio:clamp(handWidth / forearm, .25, 1.05),
+          visibility:pointVisibility([pts.shoulder, pts.otherShoulder, pts.elbow, pts.wrist, pts.thumb, pts.index, pts.pinky]),
+          projectionShortening:0,
+          estimatedReachAngle:Math.abs(palmVectorAngle),
+          compensatedAmplitude:clamp(Math.abs(palmVectorAngle) / 90 * 100, 0, 100),
+          targetLabel:'患侧手掌朝向',
+          clinical:{ palmVectorAngle, wristTravel, shoulderRiseCm }
+        };
+      }
+      if (modeName === '抓握放松') {
+        const forearm = Math.max(.04, dist2(pts.elbow, pts.wrist));
+        const handSpread = mean([dist2(pts.thumb, pts.index), dist2(pts.index, pts.pinky), dist2(pts.thumb, pts.pinky)]) / forearm;
+        const wristAngle = angleAt(pts.elbow, pts.wrist, midpoint(pts.index, pts.pinky));
+        const shoulderRiseCm = calibration.shoulderY != null
+          ? Math.max(0, (calibration.shoulderY - pts.shoulder.y) / Math.max(.04, calibration.shoulderWidthNorm || forearm) * 36)
+          : 0;
+        return {
+          primary:midpoint(pts.index, pts.pinky) || pts.wrist,
+          ratio:clamp(handSpread, .12, 1.05),
+          visibility:pointVisibility([pts.shoulder, pts.elbow, pts.wrist, pts.thumb, pts.index, pts.pinky]),
+          projectionShortening:0,
+          estimatedReachAngle:wristAngle,
+          compensatedAmplitude:clamp(handSpread * 180, 0, 100),
+          targetLabel:'患侧手部开合',
+          clinical:{ handSpread, wristAngle, shoulderRiseCm }
+        };
+      }
       if (modeName === '平衡模式') {
         const primary = midpoint(shoulderMid, hipMid) || hipMid || shoulderMid;
         const shoulderWidth = dist2(pts.shoulder, pts.otherShoulder);
@@ -1744,12 +1983,12 @@
       const required = requiredVisionPoints(mode.mode, pts);
       if (required.some(x => !x)) {
         openToast(`${mode.mode}需要识别：${mode.points.join('、')}。请调整摄像头，让对应部位完整出现在画面中。`);
-        return;
+        return false;
       }
       if (pointVisibility(required) < 35) {
         setVisionPhase(`校准前请调整镜头 · ${visionModeGuidance(mode.mode)}`, 35);
         openToast(`${mode.mode}关键点置信度偏低。${visionModeGuidance(mode.mode)}`);
-        return;
+        return false;
       }
       const upper = dist2(pts.shoulder, pts.elbow);
       const fore = dist2(pts.elbow, pts.wrist);
@@ -1759,10 +1998,11 @@
       const thigh = dist2(pts.hip, pts.knee);
       const shank = dist2(pts.knee, pts.ankle);
       const foot = dist2(pts.heel, pts.toe);
-      const baselineCheck = mode.mode === '平衡模式' ? [shoulderWidth, hipWidth, trunk] : mode.mode === '上肢模式' ? [upper, fore] : [thigh, shank];
+      const upperLimbModes = ['上肢模式','对侧肩触碰','前臂旋转','抓握放松'];
+      const baselineCheck = mode.mode === '平衡模式' ? [shoulderWidth, hipWidth, trunk] : upperLimbModes.includes(mode.mode) ? [upper, fore] : [thigh, shank];
       if (baselineCheck.some(x => x < .03)) {
         openToast('骨段长度过短，可能存在遮挡或距离过远，请调整摄像头后重新校准。');
-        return;
+        return false;
       }
       visionProfile(p).calibration = {
         upperArmBaseline:Math.round(upper * 1000),
@@ -1781,6 +2021,9 @@
         thighNorm:thigh,
         shankNorm:shank,
         footNorm:foot,
+        shoulderY:pts.shoulder?.y,
+        palmAngleBaseline:Math.atan2((pts.index?.y || 0) - (pts.pinky?.y || 0), (pts.index?.x || 0) - (pts.pinky?.x || 0)) * 180 / Math.PI,
+        handSpreadBaseline:mean([dist2(pts.thumb, pts.index), dist2(pts.index, pts.pinky), dist2(pts.thumb, pts.pinky)]) / Math.max(.04, fore),
         calibratedMode:mode.mode,
         cameraPosition:'已完成真实摄像头校准',
         calibratedAt:nowText()
@@ -1790,6 +2033,7 @@
       setVisionPhase('骨长校准完成', 42);
       setVisionButtonState();
       openToast(`${mode.mode}校准完成，已记录${mode.points.join('、')}对应基准。`);
+      return true;
     }
     function startRealVisionTraining() {
       const p = patient(accessiblePatientId());
@@ -1801,10 +2045,14 @@
         openToast('暂未识别到人体关键点，请调整坐姿和摄像头角度。');
         return;
       }
-      const cal = visionProfile(p).calibration || {};
-      if (!cal.upperArmNorm || !cal.forearmNorm) calibrateVisionPose();
       const action = currentVisionAction(p);
       const mode = visualModeForAction(action);
+      const cal = visionProfile(p).calibration || {};
+      if (!cal.upperArmNorm || !cal.forearmNorm || cal.calibratedMode !== mode.mode) {
+        const calibrated = calibrateVisionPose();
+        if (calibrated) openToast(`已按${mode.mode}完成校准，请再次点击“开始训练”。`);
+        return;
+      }
       const pts = landmarkSet(visionRuntime.lastResults);
       const required = requiredVisionPoints(mode.mode, pts);
       if (required.some(x => !x)) {
@@ -1824,6 +2072,8 @@
         startedAt:performance.now(),
         frames:0,
         jerkValues:[],
+        palmAngles:[],
+        handSpreads:[],
         startPoint:null,
         lastPoint:null,
         smoothedPoint:null,
@@ -1842,6 +2092,8 @@
       visionRuntime.training = true;
       setVisionStatus('真实训练采集中', 'bg-violet-50 text-violet-700 border border-violet-100');
       setVisionPhase('真实训练采集中', 50);
+      const definition = visionActionDefinition(action);
+      if (definition) speakVisionFeedback(definition.voice);
       setVisionButtonState();
     }
     function onPoseResults(results) {
@@ -1861,8 +2113,13 @@
       drawPoseOverlay(ctx, canvas, results.poseLandmarks || []);
       ctx.restore();
       if (!visionRuntime.training) {
-        if ((results.poseLandmarks || []).length) setVisionPhase('已识别人体关键点，可校准', 35);
-        else setVisionPhase('摄像头已打开，请让上半身进入画面', 30);
+        if ((results.poseLandmarks || []).length) {
+          setVisionStatus('人体关键点已识别，可校准', 'bg-green-50 text-success border border-green-100');
+          setVisionPhase('已识别人体关键点，可校准', 35);
+        } else {
+          setVisionStatus('摄像头已打开，正在寻找人体关键点', 'bg-blue-50 text-primary border border-blue-100');
+          setVisionPhase(`正在识别 · ${visionModeGuidance(visualModeForAction(currentVisionAction(patient(accessiblePatientId()))).mode)}`, 30);
+        }
       }
       if (visionRuntime.training) collectVisionFrame(results);
     }
@@ -1880,7 +2137,13 @@
       const mode = visualModeForAction(currentVisionAction(p)).mode;
       let core = [poseIndex(side,'shoulder'), poseIndex(side,'elbow'), poseIndex(side,'wrist'), poseIndex(side,'hip')];
       let lines = [[poseIndex(side,'shoulder'), poseIndex(side,'elbow')], [poseIndex(side,'elbow'), poseIndex(side,'wrist')], [11,12], [23,24], [11,23], [12,24]];
-      if (mode === '平衡模式') {
+      if (mode === '对侧肩触碰') {
+        core = [11,12,23,24,poseIndex(side,'elbow'),poseIndex(side,'wrist')];
+        lines = [[11,12],[23,24],[11,23],[12,24],[poseIndex(side,'shoulder'),poseIndex(side,'elbow')],[poseIndex(side,'elbow'),poseIndex(side,'wrist')]];
+      } else if (mode === '前臂旋转' || mode === '抓握放松') {
+        core = [11,12,poseIndex(side,'elbow'),poseIndex(side,'wrist'),poseIndex(side,'thumb'),poseIndex(side,'index'),poseIndex(side,'pinky')];
+        lines = [[11,12],[poseIndex(side,'shoulder'),poseIndex(side,'elbow')],[poseIndex(side,'elbow'),poseIndex(side,'wrist')],[poseIndex(side,'wrist'),poseIndex(side,'thumb')],[poseIndex(side,'wrist'),poseIndex(side,'index')],[poseIndex(side,'wrist'),poseIndex(side,'pinky')],[poseIndex(side,'thumb'),poseIndex(side,'index')],[poseIndex(side,'index'),poseIndex(side,'pinky')]];
+      } else if (mode === '平衡模式') {
         core = [11,12,23,24];
         lines = [[11,12],[23,24],[11,23],[12,24],[11,24],[12,23]];
       } else if (mode === '转移模式') {
@@ -1892,6 +2155,7 @@
       }
       const labels = {
         11:'左肩', 12:'右肩', 13:'左肘', 14:'右肘', 15:'左腕', 16:'右腕',
+        17:'左小指', 18:'右小指', 19:'左食指', 20:'右食指', 21:'左拇指', 22:'右拇指',
         23:'左髋', 24:'右髋', 25:'左膝', 26:'右膝', 27:'左踝', 28:'右踝',
         29:'左跟', 30:'右跟', 31:'左足', 32:'右足'
       };
@@ -2000,7 +2264,13 @@
       } else {
         visionRuntime.warningFrames = Math.max(0, visionRuntime.warningFrames - 2);
       }
-      const abnormalMessage = assessVisionAbnormal(metrics, pts, task, jerkPeak, smoothnessScore, confidence);
+      const elapsed = Math.max(1, (now - metrics.startedAt) / 1000);
+      const clinicalResult = assessClinicalAction(metrics, task, elapsed);
+      const abnormalMessage = clinicalResult.warning || assessVisionAbnormal(metrics, pts, task, jerkPeak, smoothnessScore, confidence);
+      if (clinicalResult.prompt) {
+        setVisionPhase(`动作提示 · ${clinicalResult.prompt}`, Math.min(92, 50 + elapsed * 4));
+        speakVisionFeedback(clinicalResult.prompt);
+      }
       const alarmReady = metrics.frames > 18 && (now - metrics.startedAt) > 1800;
       if (abnormalMessage && alarmReady) {
         visionRuntime.alarmFrames += 1;
@@ -2012,12 +2282,12 @@
       if (!visionRuntime.alarmActive && visionRuntime.alarmFrames >= 12) {
         metrics.abnormalWarning = abnormalMessage || metrics.abnormalWarning;
         setVisionAlarm(true, metrics.abnormalWarning);
+        speakVisionFeedback(metrics.abnormalWarning);
       } else if (visionRuntime.alarmActive && visionRuntime.alarmSafeFrames >= 8) {
         visionRuntime.alarmFrames = 0;
         visionRuntime.alarmSafeFrames = 0;
         setVisionAlarm(false);
       }
-      const elapsed = Math.max(1, (now - metrics.startedAt) / 1000);
       const avgFps = clamp(metrics.frames / elapsed, 1, 60);
       const latency = clamp(220 - avgFps * 3 + metrics.mode.count * 1.8, 70, 240);
       metrics.latest = {
@@ -2035,6 +2305,7 @@
         compensatedAmplitude:task.compensatedAmplitude,
         compensationConfidence:confidence,
         targetLabel:task.targetLabel,
+        clinicalMetrics:task.clinical || {},
         abnormalWarning:metrics.abnormalWarning,
         recognitionMode:metrics.mode.mode,
         trackedPoints:metrics.mode.points,
@@ -2052,7 +2323,7 @@
       updateVisionText('vision-live-frames', metrics.frames);
       updateVisionText('vision-live-fps', avgFps);
       updateVisionText('vision-live-duration', `${elapsed.toFixed(1)}s`);
-      if (confidence >= 58) setVisionPhase(`训练采集中 · ${metrics.mode.mode}`, Math.min(95, 50 + elapsed * 4));
+      if (confidence >= 58 && !clinicalResult.prompt) setVisionPhase(`训练采集中 · ${metrics.mode.mode}`, Math.min(95, 50 + elapsed * 4));
     }
     function finishRealVisionTraining() {
       const p = patient(accessiblePatientId());

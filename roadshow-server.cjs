@@ -305,7 +305,10 @@ const server = http.createServer(async (req, res) => {
   if (!filePath.startsWith(staticRoot)) return send(res, 403, 'Forbidden');
   fs.readFile(filePath, (error, data) => {
     if (error) return send(res, 404, 'Not Found');
-    send(res, 200, data, { 'Content-Type':mime[path.extname(filePath).toLowerCase()] || 'application/octet-stream' });
+    send(res, 200, data, {
+      'Content-Type':mime[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
+      'Cache-Control':isPoseAsset ? 'public, max-age=31536000, immutable' : 'no-store'
+    });
   });
 });
 
